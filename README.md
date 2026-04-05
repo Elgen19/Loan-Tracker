@@ -76,11 +76,12 @@ This project can be deployed to Vercel as two separate projects from the same re
 - Set the root directory to `client`
 - Build command: `npm run build`
 - Output directory: `dist`
+- The frontend includes a Vercel rewrite so `/api/*` requests are proxied to the backend project without browser CORS issues
 
 Frontend environment variables:
 
 ```env
-VITE_API_URL=https://your-backend-project.vercel.app/api
+VITE_API_URL=/api
 VITE_FIREBASE_API_KEY=your_api_key
 VITE_FIREBASE_AUTH_DOMAIN=your_project.firebaseapp.com
 VITE_FIREBASE_PROJECT_ID=your_project_id
