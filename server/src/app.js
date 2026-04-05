@@ -10,49 +10,21 @@ dotenv.config();
 
 const app = express();
 
-function buildAllowedOrigins() {
-  const configuredOrigins = (process.env.CLIENT_ORIGIN || "")
-    .split(",")
-    .map((origin) => origin.trim())
-    .filter(Boolean);
+app.use((req, res, next) => {
+  const requestOrigin = req.headers.origin || "*";
 
-  return new Set([
-    "http://localhost:5173",
-    "http://127.0.0.1:5173",
-    ...configuredOrigins,
-  ]);
-}
+  res.setHeader("Access-Control-Allow-Origin", requestOrigin);
+  res.setHeader("Vary", "Origin");
+  res.setHeader("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
 
-function isAllowedOrigin(origin) {
-  if (!origin) {
-    return true;
+  if (req.method === "OPTIONS") {
+    return res.status(200).end();
   }
 
-  const allowedOrigins = buildAllowedOrigins();
+  return next();
+});
 
-  if (allowedOrigins.has(origin)) {
-    return true;
-  }
-
-  try {
-    const { hostname, protocol } = new URL(origin);
-    return protocol === "https:" && hostname.endsWith(".vercel.app");
-  } catch {
-    return false;
-  }
-}
-
-app.use(
-  cors({
-    origin(origin, callback) {
-      if (isAllowedOrigin(origin)) {
-        return callback(null, true);
-      }
-
-      return callback(new Error("Origin not allowed by CORS."));
-    },
-  })
-);
 app.use(express.json());
 app.use("/api", rateLimit({ windowMs: 60_000, maxRequests: 180 }));
 
