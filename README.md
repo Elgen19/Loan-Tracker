@@ -63,6 +63,56 @@ VITE_FIREBASE_APP_ID=your_app_id
 npm run dev
 ```
 
+## Vercel Deployment
+
+This project can be deployed to Vercel as two separate projects from the same repository:
+
+- `client` as the frontend project
+- `server` as the backend project
+
+### Frontend project
+
+- Import the repository into Vercel
+- Set the root directory to `client`
+- Build command: `npm run build`
+- Output directory: `dist`
+
+Frontend environment variables:
+
+```env
+VITE_API_URL=https://your-backend-project.vercel.app/api
+VITE_FIREBASE_API_KEY=your_api_key
+VITE_FIREBASE_AUTH_DOMAIN=your_project.firebaseapp.com
+VITE_FIREBASE_PROJECT_ID=your_project_id
+VITE_FIREBASE_APP_ID=your_app_id
+```
+
+### Backend project
+
+- Import the same repository into Vercel again
+- Set the root directory to `server`
+- Vercel will use the catch-all function in `server/api/[...path].js`
+
+Backend environment variables:
+
+```env
+CLIENT_ORIGIN=https://your-frontend-project.vercel.app
+FIREBASE_SERVICE_ACCOUNT_PATH=
+FIREBASE_PROJECT_ID=your-project-id
+FIREBASE_CLIENT_EMAIL=your-client-email
+FIREBASE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n"
+ALLOWED_USER_EMAILS=firstperson@example.com,secondperson@example.com
+SHARED_WORKSPACE_ID=faith-workspace
+REQUIRE_EMAIL_VERIFIED=false
+```
+
+Notes:
+
+- On Vercel, prefer `FIREBASE_PROJECT_ID`, `FIREBASE_CLIENT_EMAIL`, and `FIREBASE_PRIVATE_KEY`
+- Do not use a local file path for `FIREBASE_SERVICE_ACCOUNT_PATH` in production
+- After deployment, update the frontend `VITE_API_URL` to the backend Vercel URL
+- The API will be available under `/api/*`
+
 ## API Endpoints
 
 - `GET /api/health`
