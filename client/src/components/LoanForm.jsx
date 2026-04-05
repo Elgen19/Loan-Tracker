@@ -37,8 +37,8 @@ function buildFormState(loan) {
 }
 
 const fieldClassName =
-  "h-11 rounded-2xl border border-slate-200 bg-white px-4 text-sm text-ink outline-none transition focus:border-amber focus:ring-4 focus:ring-amber/20";
-const labelClassName = "grid gap-2 text-sm font-semibold text-slate-700";
+  "h-11 w-full min-w-0 rounded-2xl border border-slate-200 bg-white px-3 text-[13px] text-ink outline-none transition focus:border-amber focus:ring-4 focus:ring-amber/20 sm:px-4 sm:text-sm";
+const labelClassName = "grid min-w-0 gap-2 text-sm font-semibold text-slate-700";
 const sectionClassName = "rounded-3xl border border-white/70 bg-white/90 p-4 shadow-glass backdrop-blur sm:rounded-[28px] sm:p-6";
 
 function roundToTwo(value) {
@@ -193,7 +193,7 @@ export default function LoanForm({
         <label className={`${labelClassName} col-span-2`}>
           Notes
           <textarea
-            className="min-h-[88px] rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-ink outline-none transition focus:border-amber focus:ring-4 focus:ring-amber/20 sm:min-h-[96px]"
+            className="min-h-[88px] w-full min-w-0 rounded-2xl border border-slate-200 bg-white px-3 py-3 text-[13px] text-ink outline-none transition focus:border-amber focus:ring-4 focus:ring-amber/20 sm:min-h-[96px] sm:px-4 sm:text-sm"
             name="notes"
             rows="3"
             value={formData.notes}
