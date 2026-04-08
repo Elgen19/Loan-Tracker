@@ -180,6 +180,70 @@ function ContainerCard({ container, loanCount, totalBalance, onOpen }) {
   );
 }
 
+function UrgentLoanGroup({
+  title,
+  subtitle,
+  loans,
+  emptyMessage,
+  sectionClassName,
+  badgeClassName,
+  dotClassName,
+  amountClassName,
+  rowClassName,
+}) {
+  const totalAmount = loans.reduce((sum, loan) => sum + Number(loan.monthlyPayment || 0), 0);
+
+  return (
+    <section className={`rounded-[28px] border p-4 sm:p-5 ${sectionClassName}`}>
+      <div className="flex flex-col gap-3 border-b border-black/5 pb-4 sm:flex-row sm:items-start sm:justify-between">
+        <div className="flex items-start gap-3">
+          <span className={`mt-1 h-3 w-3 shrink-0 rounded-full ${dotClassName}`} />
+          <div>
+            <div className="flex flex-wrap items-center gap-2">
+              <h4 className="text-base font-semibold text-ink sm:text-lg">{title}</h4>
+              <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ${badgeClassName}`}>
+                {loans.length} loan{loans.length === 1 ? "" : "s"}
+              </span>
+            </div>
+            <p className="mt-1 text-sm text-slate-600">{subtitle}</p>
+          </div>
+        </div>
+        <div className="rounded-2xl bg-white/80 px-3 py-2 text-left shadow-sm sm:min-w-[140px] sm:text-right">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-500">Amount due</p>
+          <strong className={`mt-1 block text-lg font-semibold ${amountClassName}`}>{formatCurrency(totalAmount)}</strong>
+        </div>
+      </div>
+
+      {loans.length > 0 ? (
+        <div className="mt-4 grid gap-3">
+          {loans.map((loan) => (
+            <article key={loan.id} className={`rounded-2xl border px-4 py-3 ${rowClassName}`}>
+              <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto_auto] md:items-center">
+                <div className="min-w-0">
+                  <p className="truncate font-semibold text-ink">{loan.loanName}</p>
+                  <p className="mt-1 text-sm text-slate-600">Billing date {formatDate(loan.nextDueDate)}</p>
+                </div>
+                <div>
+                  <span className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Status</span>
+                  <strong className="mt-1 block text-sm font-semibold text-slate-700">{loan.dueLabel}</strong>
+                </div>
+                <div>
+                  <span className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Amount</span>
+                  <strong className={`mt-1 block text-base font-semibold ${amountClassName}`}>{formatCurrency(loan.monthlyPayment)}</strong>
+                </div>
+              </div>
+            </article>
+          ))}
+        </div>
+      ) : (
+        <div className="mt-4 rounded-2xl border border-dashed border-slate-300 bg-white/70 px-4 py-5 text-sm text-slate-600">
+          {emptyMessage}
+        </div>
+      )}
+    </section>
+  );
+}
+
 export default function App() {
   const [user, setUser] = React.useState(null);
   const [isAuthLoading, setIsAuthLoading] = React.useState(true);
@@ -458,6 +522,39 @@ export default function App() {
       };
     });
   }, [containers, loans]);
+
+  const urgentDueLoans = React.useMemo(() => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    const scopedLoans = selectedContainerId ? loans.filter((loan) => loan.containerId === selectedContainerId) : loans;
+
+    return scopedLoans
+      .filter((loan) => loan.loanType === "fixed" && loan.nextDueDate)
+      .map((loan) => {
+        const dueDate = new Date(loan.nextDueDate);
+        dueDate.setHours(0, 0, 0, 0);
+        const diffDays = Math.round((dueDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+        const container = containers.find((item) => item.id === loan.containerId);
+
+        return {
+          ...loan,
+          diffDays,
+          dueLabel: diffDays === 0 ? "Due today" : diffDays === 1 ? "Due in 1 day" : diffDays === 3 ? "Due in 3 days" : "",
+          containerName: container?.name || "Unassigned",
+        };
+      })
+      .filter((loan) => loan.diffDays === 0 || loan.diffDays === 1 || loan.diffDays === 3)
+      .sort((left, right) => left.diffDays - right.diffDays || new Date(left.nextDueDate).getTime() - new Date(right.nextDueDate).getTime());
+  }, [containers, loans, selectedContainerId]);
+
+  const groupedUrgentDueLoans = React.useMemo(() => {
+    return {
+      today: urgentDueLoans.filter((loan) => loan.diffDays === 0),
+      oneDay: urgentDueLoans.filter((loan) => loan.diffDays === 1),
+      threeDays: urgentDueLoans.filter((loan) => loan.diffDays === 3),
+    };
+  }, [urgentDueLoans]);
 
   async function handleSaveLoan(payload) {
     try {
@@ -840,6 +937,70 @@ export default function App() {
 
           {!isLoading && selectedContainerView === "loans" ? (
             <div className="grid gap-4">
+              <section className="rounded-3xl border border-slate-200 bg-white p-4 shadow-glass sm:rounded-[28px] sm:p-6">
+                <div className="mb-5 flex flex-col gap-4 border-b border-slate-100 pb-5 md:flex-row md:items-end md:justify-between">
+                  <div>
+                    <p className="mb-2 text-xs font-bold uppercase tracking-[0.22em] text-slateblue">Billing Alerts</p>
+                    <h3 className="text-lg font-semibold text-ink sm:text-xl">Upcoming billing dates in {selectedContainer.name}</h3>
+                    <p className="mt-1 max-w-2xl text-sm text-slate-600">
+                      A cleaner priority view of the loans that need attention first inside this container.
+                    </p>
+                  </div>
+                  <div className="grid grid-cols-3 gap-2 sm:gap-3">
+                    <div className="rounded-2xl border border-rose-200 bg-rose-50 px-3 py-2 text-center">
+                      <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-rose-700">Today</p>
+                      <strong className="mt-1 block text-lg font-semibold text-rose-900">{groupedUrgentDueLoans.today.length}</strong>
+                    </div>
+                    <div className="rounded-2xl border border-orange-200 bg-orange-50 px-3 py-2 text-center">
+                      <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-orange-700">1 Day</p>
+                      <strong className="mt-1 block text-lg font-semibold text-orange-900">{groupedUrgentDueLoans.oneDay.length}</strong>
+                    </div>
+                    <div className="rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2 text-center">
+                      <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-amber-700">3 Days</p>
+                      <strong className="mt-1 block text-lg font-semibold text-amber-900">{groupedUrgentDueLoans.threeDays.length}</strong>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="grid gap-4">
+                  <UrgentLoanGroup
+                    title="Loans due today"
+                    subtitle="These need the quickest attention."
+                    loans={groupedUrgentDueLoans.today}
+                    emptyMessage="No loans are due today inside this container."
+                    sectionClassName="border-rose-200 bg-gradient-to-r from-rose-50 via-white to-white"
+                    badgeClassName="bg-rose-100 text-rose-700"
+                    dotClassName="bg-rose-500"
+                    amountClassName="text-rose-700"
+                    rowClassName="border-rose-100 bg-white"
+                  />
+
+                  <UrgentLoanGroup
+                    title="Loans due in 1 day"
+                    subtitle="A short tomorrow list so upcoming dues are easy to spot."
+                    loans={groupedUrgentDueLoans.oneDay}
+                    emptyMessage="No loans are due in exactly 1 day inside this container."
+                    sectionClassName="border-orange-200 bg-gradient-to-r from-orange-50 via-white to-white"
+                    badgeClassName="bg-orange-100 text-orange-700"
+                    dotClassName="bg-orange-500"
+                    amountClassName="text-orange-700"
+                    rowClassName="border-orange-100 bg-white"
+                  />
+
+                  <UrgentLoanGroup
+                    title="Loans due in 3 days"
+                    subtitle="A short early warning list for bills approaching soon."
+                    loans={groupedUrgentDueLoans.threeDays}
+                    emptyMessage="No loans are due in exactly 3 days inside this container."
+                    sectionClassName="border-amber-200 bg-gradient-to-r from-amber-50 via-white to-white"
+                    badgeClassName="bg-amber-100 text-amber-800"
+                    dotClassName="bg-amber-500"
+                    amountClassName="text-amber-700"
+                    rowClassName="border-amber-100 bg-white"
+                  />
+                </div>
+              </section>
+
               {filteredLoans.map((loan) => (
                 <LoanCard
                   key={loan.id}

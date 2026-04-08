@@ -108,7 +108,7 @@ export default function LoanCard({
           </div>
         </div>
 
-        <div className="mt-4 grid grid-cols-2 gap-3 sm:mt-5 sm:gap-4">
+        <div className="mt-4 grid grid-cols-2 gap-3 sm:mt-5 sm:gap-4 lg:grid-cols-3">
           <div>
             <span className="text-sm text-slate-500">Remaining balance</span>
             <strong className="mt-1 block text-base font-semibold text-ink sm:text-lg">{formatCurrency(loan.remainingBalance)}</strong>
@@ -116,6 +116,12 @@ export default function LoanCard({
           <div>
             <span className="text-sm text-slate-500">Monthly payment</span>
             <strong className="mt-1 block text-base font-semibold text-ink sm:text-lg">{formatCurrency(loan.monthlyPayment)}</strong>
+          </div>
+          <div>
+            <span className="text-sm text-slate-500">Next billing date</span>
+            <strong className="mt-1 block text-base font-semibold text-ink sm:text-lg">
+              {loan.loanType === "fixed" ? formatDate(loan.nextDueDate) : "Not applicable"}
+            </strong>
           </div>
         </div>
 
