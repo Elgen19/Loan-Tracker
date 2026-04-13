@@ -65,6 +65,19 @@ export function addPayment(loanId, payload) {
   });
 }
 
+export function updatePayment(loanId, paymentId, payload) {
+  return request(`/loans/${loanId}/payments/${paymentId}`, {
+    method: "PUT",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function deletePayment(loanId, paymentId) {
+  return request(`/loans/${loanId}/payments/${paymentId}`, {
+    method: "DELETE",
+  });
+}
+
 export function claimLegacyData() {
   return request("/auth/claim-legacy-data", {
     method: "POST",

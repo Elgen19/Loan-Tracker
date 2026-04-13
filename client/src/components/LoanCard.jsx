@@ -1,5 +1,13 @@
 import { formatCurrency, formatDate, getStatusLabel } from "../utils";
 
+function getProofUrls(proofImages) {
+  return Array.isArray(proofImages)
+    ? proofImages
+        .map((proofImage) => (typeof proofImage === "string" ? proofImage : proofImage?.url || ""))
+        .filter(Boolean)
+    : [];
+}
+
 function EditIcon() {
   return (
     <svg viewBox="0 0 24 24" aria-hidden="true" className="h-[18px] w-[18px] fill-current">
@@ -24,9 +32,19 @@ function PaymentIcon() {
   );
 }
 
+function ProofIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" className="h-[18px] w-[18px] fill-current">
+      <path d="M19 5H5a2 2 0 0 0-2 2v10.5A2.5 2.5 0 0 0 5.5 20h13a2.5 2.5 0 0 0 2.5-2.5V8l-2-3ZM5 7h13.3l.7 1.05V17.5a.5.5 0 0 1-.5.5h-13a.5.5 0 0 1-.5-.5V7Zm2 8 2.2-2.7a1 1 0 0 1 1.55 0l1.54 1.89 2.14-2.54a1 1 0 0 1 1.52.02L18 15H7Zm1.75-4.5a1.25 1.25 0 1 0 0-2.5 1.25 1.25 0 0 0 0 2.5Z" />
+    </svg>
+  );
+}
+
 export default function LoanCard({
   loan,
   onOpenPaymentModal,
+  onEditPayment,
+  onViewPaymentProofs,
   onEdit,
   onDelete,
   isDeleting,
@@ -201,11 +219,28 @@ export default function LoanCard({
                 {loan.payments.map((payment) => (
                   <li
                     key={payment.id}
-                    className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 rounded-2xl border border-sky-100 bg-sky-50/90 px-4 py-3 transition hover:border-cyan-300 hover:bg-white"
+                    className="flex cursor-pointer flex-wrap items-center justify-between gap-x-3 gap-y-2 rounded-2xl border border-sky-100 bg-sky-50/90 px-4 py-3 transition hover:border-cyan-300 hover:bg-white"
+                    onClick={() => onEditPayment(loan, payment)}
                   >
                     <strong className="text-sm font-semibold text-ink sm:text-base">{formatCurrency(payment.amount)}</strong>
                     <span className="text-sm text-slate-500">{formatDate(payment.paymentDate)}</span>
                     <p className="min-w-0 flex-1 text-sm text-slate-600">{payment.note || "Payment logged"}</p>
+                    <div className="ml-auto flex items-center gap-2">
+                      {getProofUrls(payment.proofImages).length > 0 ? (
+                        <button
+                          type="button"
+                          className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-white text-slateblue transition hover:-translate-y-0.5 hover:bg-slate-100 focus:outline-none focus:ring-4 focus:ring-slate-200"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            onViewPaymentProofs(loan, payment, 0);
+                          }}
+                          aria-label={`View proof of payment for ${loan.loanName}`}
+                          title="View proof of payment"
+                        >
+                          <ProofIcon />
+                        </button>
+                      ) : null}
+                    </div>
                   </li>
                 ))}
               </ul>

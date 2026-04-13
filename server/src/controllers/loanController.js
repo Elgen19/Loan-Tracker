@@ -1,4 +1,4 @@
-import { addPayment, createLoan, deleteLoan, getLoanById, listLoans, recalculateLoanSchedules, updateLoan } from "../data/loanRepository.js";
+import { addPayment, createLoan, deleteLoan, deletePayment, getLoanById, listLoans, recalculateLoanSchedules, updateLoan, updatePayment } from "../data/loanRepository.js";
 import { getContainerById, listContainers } from "../data/containerRepository.js";
 import { logAuditEvent } from "../utils/audit.js";
 import { filterContainersForUser, isAllowedContainerForUser } from "../utils/accessPolicy.js";
@@ -45,6 +45,10 @@ function validatePaymentPayload(body) {
 
   if (missingField) {
     return `Missing required field: ${missingField}`;
+  }
+
+  if (Array.isArray(body.proofImages) && body.proofImages.length > 3) {
+    return "You can only upload up to 3 proof images.";
   }
 
   return null;
@@ -155,6 +159,90 @@ export async function postPayment(req, res, next) {
     });
 
     return res.status(201).json(loan);
+  } catch (error) {
+    return next(error);
+  }
+}
+
+export async function putPayment(req, res, next) {
+  const validationError = validatePaymentPayload(req.body);
+
+  if (validationError) {
+    return res.status(400).json({ message: validationError });
+  }
+
+  try {
+    const existingLoan = await getLoanById(req.workspaceId, req.params.loanId);
+
+    if (!existingLoan) {
+      return res.status(404).json({ message: "Loan not found." });
+    }
+
+    const existingContainer = await getContainerById(req.workspaceId, existingLoan.containerId);
+
+    if (!isAllowedContainerForUser(req.user.email, existingContainer)) {
+      return res.status(404).json({ message: "Loan not found." });
+    }
+
+    const result = await updatePayment(req.workspaceId, req.params.loanId, req.params.paymentId, req.body);
+
+    if (!result) {
+      return res.status(404).json({ message: "Payment not found." });
+    }
+
+    await logAuditEvent(req, {
+      action: "payment.update",
+      targetType: "loan",
+      targetId: result.loan.id,
+      summary: `Updated payment on ${result.loan.loanName}`,
+      metadata: {
+        loanName: result.loan.loanName,
+        paymentId: req.params.paymentId,
+        amount: Number(req.body.amount || 0),
+        paymentDate: req.body.paymentDate || "",
+      },
+    });
+
+    return res.json(result.loan);
+  } catch (error) {
+    return next(error);
+  }
+}
+
+export async function removePayment(req, res, next) {
+  try {
+    const existingLoan = await getLoanById(req.workspaceId, req.params.loanId);
+
+    if (!existingLoan) {
+      return res.status(404).json({ message: "Loan not found." });
+    }
+
+    const existingContainer = await getContainerById(req.workspaceId, existingLoan.containerId);
+
+    if (!isAllowedContainerForUser(req.user.email, existingContainer)) {
+      return res.status(404).json({ message: "Loan not found." });
+    }
+
+    const result = await deletePayment(req.workspaceId, req.params.loanId, req.params.paymentId);
+
+    if (!result) {
+      return res.status(404).json({ message: "Payment not found." });
+    }
+
+    await logAuditEvent(req, {
+      action: "payment.delete",
+      targetType: "loan",
+      targetId: result.loan.id,
+      summary: `Deleted payment from ${result.loan.loanName}`,
+      metadata: {
+        loanName: result.loan.loanName,
+        paymentId: req.params.paymentId,
+        amount: Number(result.payment?.amount || 0),
+        paymentDate: result.payment?.paymentDate || "",
+      },
+    });
+
+    return res.status(204).send();
   } catch (error) {
     return next(error);
   }

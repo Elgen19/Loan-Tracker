@@ -5,7 +5,18 @@ import AuthScreen from "./components/AuthScreen";
 import LoanForm from "./components/LoanForm";
 import LoanCard from "./components/LoanCard";
 import PaymentForm from "./components/PaymentForm";
-import { addPayment, claimLegacyData, createContainer, createLoan, deleteLoan, fetchContainers, fetchLoans, updateLoan } from "./api";
+import {
+  addPayment,
+  claimLegacyData,
+  createContainer,
+  createLoan,
+  deleteLoan,
+  deletePayment as deletePaymentEntry,
+  fetchContainers,
+  fetchLoans,
+  updateLoan,
+  updatePayment as updatePaymentEntry,
+} from "./api";
 import { auth } from "./firebase";
 import { formatCurrency, formatDate } from "./utils";
 
@@ -75,6 +86,85 @@ function getPaidAmountForCurrentCycle(loan) {
   }, 0);
 }
 
+function getPaymentCycleDays(paymentFrequency) {
+  switch (paymentFrequency) {
+    case "weekly":
+      return 7;
+    case "twice per month":
+      return 15;
+    case "once per month":
+    case "other":
+    default:
+      return 30;
+  }
+}
+
+function getLoanProviderName(loanName) {
+  return String(loanName || "").trim().toUpperCase();
+}
+
+function getEstimatedMissedDueCount(loan, daysPastDue) {
+  return Math.max(1, Math.floor(daysPastDue / getPaymentCycleDays(loan.paymentFrequency)) + 1);
+}
+
+function calculateOverduePenalty(loan, daysPastDue) {
+  const provider = getLoanProviderName(loan.loanName);
+  const principal = Number(loan.principal || 0);
+  const remainingBalance = Number(loan.remainingBalance || 0);
+  const monthlyPayment = Number(loan.monthlyPayment || 0);
+  const totalPayable = Number(loan.totalPayable || 0);
+  const missedDueCount = getEstimatedMissedDueCount(loan, daysPastDue);
+
+  if (provider.includes("GLOAN") || provider.includes("GGIVES")) {
+    return principal * 0.01 * missedDueCount + remainingBalance * 0.0015 * daysPastDue;
+  }
+
+  if (provider.includes("JUANHAND")) {
+    return remainingBalance * 0.0016 * daysPastDue;
+  }
+
+  if (provider.includes("BILLEASE")) {
+    if (daysPastDue <= 2) {
+      return 0;
+    }
+
+    const effectivePenaltyDays = Math.max(daysPastDue, 3);
+    return Math.max(monthlyPayment * 0.05, 50 * effectivePenaltyDays);
+  }
+
+  if (provider.includes("TALA")) {
+    return remainingBalance * 0.05;
+  }
+
+  if (provider.includes("PESO LOAN")) {
+    const dailyRate = daysPastDue <= 14 ? 0.02 : 0.03;
+    return remainingBalance * dailyRate * daysPastDue;
+  }
+
+  if (provider.includes("TONIK")) {
+    return 500 * missedDueCount;
+  }
+
+  if (provider.includes("MAYA")) {
+    return remainingBalance * 0.0017 * daysPastDue;
+  }
+
+  if (provider.includes("SLOAN")) {
+    const monthlyRate = 0.025;
+    return totalPayable * monthlyRate * (daysPastDue / 30);
+  }
+
+  return 0;
+}
+
+function getProofUrls(proofImages) {
+  return Array.isArray(proofImages)
+    ? proofImages
+        .map((proofImage) => (typeof proofImage === "string" ? proofImage : proofImage?.url || ""))
+        .filter(Boolean)
+    : [];
+}
+
 function StatCard({ label, value }) {
   return (
     <article className="relative overflow-hidden rounded-3xl border border-white/70 bg-white/90 p-4 shadow-glass backdrop-blur transition duration-200 hover:-translate-y-0.5 hover:shadow-2xl sm:rounded-[28px] sm:p-5">
@@ -113,6 +203,18 @@ function CloseIcon() {
   return (
     <svg viewBox="0 0 24 24" aria-hidden="true" className="h-[18px] w-[18px] fill-none stroke-current stroke-2">
       <path d="M6 6l12 12M18 6L6 18" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function CarouselArrowIcon({ direction = "right" }) {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" className="h-[18px] w-[18px] fill-none stroke-current stroke-2">
+      {direction === "left" ? (
+        <path d="M15 6l-6 6 6 6" strokeLinecap="round" strokeLinejoin="round" />
+      ) : (
+        <path d="m9 6 6 6-6 6" strokeLinecap="round" strokeLinejoin="round" />
+      )}
     </svg>
   );
 }
@@ -180,68 +282,11 @@ function ContainerCard({ container, loanCount, totalBalance, onOpen }) {
   );
 }
 
-function UrgentLoanGroup({
-  title,
-  subtitle,
-  loans,
-  emptyMessage,
-  sectionClassName,
-  badgeClassName,
-  dotClassName,
-  amountClassName,
-  rowClassName,
-}) {
-  const totalAmount = loans.reduce((sum, loan) => sum + Number(loan.monthlyPayment || 0), 0);
-
-  return (
-    <section className={`rounded-[28px] border p-4 sm:p-5 ${sectionClassName}`}>
-      <div className="flex flex-col gap-3 border-b border-black/5 pb-4 sm:flex-row sm:items-start sm:justify-between">
-        <div className="flex items-start gap-3">
-          <span className={`mt-1 h-3 w-3 shrink-0 rounded-full ${dotClassName}`} />
-          <div>
-            <div className="flex flex-wrap items-center gap-2">
-              <h4 className="text-base font-semibold text-ink sm:text-lg">{title}</h4>
-              <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ${badgeClassName}`}>
-                {loans.length} loan{loans.length === 1 ? "" : "s"}
-              </span>
-            </div>
-            <p className="mt-1 text-sm text-slate-600">{subtitle}</p>
-          </div>
-        </div>
-        <div className="rounded-2xl bg-white/80 px-3 py-2 text-left shadow-sm sm:min-w-[140px] sm:text-right">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-500">Amount due</p>
-          <strong className={`mt-1 block text-lg font-semibold ${amountClassName}`}>{formatCurrency(totalAmount)}</strong>
-        </div>
-      </div>
-
-      {loans.length > 0 ? (
-        <div className="mt-4 grid gap-3">
-          {loans.map((loan) => (
-            <article key={loan.id} className={`rounded-2xl border px-4 py-3 ${rowClassName}`}>
-              <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto_auto] md:items-center">
-                <div className="min-w-0">
-                  <p className="truncate font-semibold text-ink">{loan.loanName}</p>
-                  <p className="mt-1 text-sm text-slate-600">Billing date {formatDate(loan.nextDueDate)}</p>
-                </div>
-                <div>
-                  <span className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Status</span>
-                  <strong className="mt-1 block text-sm font-semibold text-slate-700">{loan.dueLabel}</strong>
-                </div>
-                <div>
-                  <span className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Amount</span>
-                  <strong className={`mt-1 block text-base font-semibold ${amountClassName}`}>{formatCurrency(loan.monthlyPayment)}</strong>
-                </div>
-              </div>
-            </article>
-          ))}
-        </div>
-      ) : (
-        <div className="mt-4 rounded-2xl border border-dashed border-slate-300 bg-white/70 px-4 py-5 text-sm text-slate-600">
-          {emptyMessage}
-        </div>
-      )}
-    </section>
-  );
+function createNavigationState(selectedContainerId, selectedContainerView) {
+  return {
+    selectedContainerId,
+    selectedContainerView,
+  };
 }
 
 export default function App() {
@@ -260,7 +305,9 @@ export default function App() {
   const [newLoanContainerId, setNewLoanContainerId] = React.useState("");
   const [isLoanModalOpen, setIsLoanModalOpen] = React.useState(false);
   const [isContainerModalOpen, setIsContainerModalOpen] = React.useState(false);
-  const [paymentModalLoan, setPaymentModalLoan] = React.useState(null);
+  const [paymentModalState, setPaymentModalState] = React.useState(null);
+  const [paymentProofViewer, setPaymentProofViewer] = React.useState(null);
+  const [deletingPaymentId, setDeletingPaymentId] = React.useState("");
   const [expandedLoanId, setExpandedLoanId] = React.useState("");
   const [selectedContainerView, setSelectedContainerView] = React.useState("loans");
   const [searchTerm, setSearchTerm] = React.useState("");
@@ -268,6 +315,9 @@ export default function App() {
   const [loanTypeFilter, setLoanTypeFilter] = React.useState("all");
   const [dueWindowDays, setDueWindowDays] = React.useState(7);
   const [error, setError] = React.useState("");
+  const hasInitializedHistoryRef = React.useRef(false);
+  const isHandlingPopStateRef = React.useRef(false);
+  const lastNavigationKeyRef = React.useRef("");
 
   const loadData = React.useCallback(async () => {
     if (!auth.currentUser) {
@@ -317,6 +367,47 @@ export default function App() {
 
     return unsubscribe;
   }, [loadData]);
+
+  React.useEffect(() => {
+    const handlePopState = (event) => {
+      const nextState = event.state || createNavigationState("", "loans");
+
+      isHandlingPopStateRef.current = true;
+      setSelectedContainerId(nextState.selectedContainerId || "");
+      setSelectedContainerView(nextState.selectedContainerView || "loans");
+      setExpandedLoanId("");
+      setSearchTerm("");
+      setStatusFilter("all");
+      setLoanTypeFilter("all");
+      setDueWindowDays(7);
+    };
+
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, []);
+
+  React.useEffect(() => {
+    const navigationState = createNavigationState(selectedContainerId, selectedContainerView);
+    const navigationKey = `${navigationState.selectedContainerId}:${navigationState.selectedContainerView}`;
+
+    if (!hasInitializedHistoryRef.current) {
+      window.history.replaceState(navigationState, "");
+      hasInitializedHistoryRef.current = true;
+      lastNavigationKeyRef.current = navigationKey;
+      return;
+    }
+
+    if (isHandlingPopStateRef.current) {
+      isHandlingPopStateRef.current = false;
+      lastNavigationKeyRef.current = navigationKey;
+      return;
+    }
+
+    if (lastNavigationKeyRef.current !== navigationKey) {
+      window.history.pushState(navigationState, "");
+      lastNavigationKeyRef.current = navigationKey;
+    }
+  }, [selectedContainerId, selectedContainerView]);
 
   const selectedContainer = React.useMemo(() => {
     return containers.find((container) => container.id === selectedContainerId) || null;
@@ -449,10 +540,14 @@ export default function App() {
         const dueDate = new Date(loan.nextDueDate);
         dueDate.setHours(0, 0, 0, 0);
         const daysPastDue = Math.max(Math.floor((today.getTime() - dueDate.getTime()) / (1000 * 60 * 60 * 24)), 0);
+        const estimatedPenalty = calculateOverduePenalty(loan, daysPastDue);
+        const overdueAmount = Number(loan.monthlyPayment || 0) + estimatedPenalty;
 
         return {
           ...loan,
           daysPastDue,
+          estimatedPenalty,
+          overdueAmount,
         };
       })
       .sort((left, right) => right.daysPastDue - left.daysPastDue);
@@ -507,6 +602,8 @@ export default function App() {
       flexibleLoansCount: flexibleLoans.length,
       paymentActivity,
       urgentAction,
+      overduePenaltyTotal: overdueLoans.reduce((sum, loan) => sum + loan.estimatedPenalty, 0),
+      overdueAmountTotal: overdueLoans.reduce((sum, loan) => sum + loan.overdueAmount, 0),
     };
   }, [dueWindowDays, filteredLoans, summaryCards]);
 
@@ -522,39 +619,6 @@ export default function App() {
       };
     });
   }, [containers, loans]);
-
-  const urgentDueLoans = React.useMemo(() => {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-
-    const scopedLoans = selectedContainerId ? loans.filter((loan) => loan.containerId === selectedContainerId) : loans;
-
-    return scopedLoans
-      .filter((loan) => loan.loanType === "fixed" && loan.nextDueDate)
-      .map((loan) => {
-        const dueDate = new Date(loan.nextDueDate);
-        dueDate.setHours(0, 0, 0, 0);
-        const diffDays = Math.round((dueDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
-        const container = containers.find((item) => item.id === loan.containerId);
-
-        return {
-          ...loan,
-          diffDays,
-          dueLabel: diffDays === 0 ? "Due today" : diffDays === 1 ? "Due in 1 day" : diffDays === 3 ? "Due in 3 days" : "",
-          containerName: container?.name || "Unassigned",
-        };
-      })
-      .filter((loan) => loan.diffDays === 0 || loan.diffDays === 1 || loan.diffDays === 3)
-      .sort((left, right) => left.diffDays - right.diffDays || new Date(left.nextDueDate).getTime() - new Date(right.nextDueDate).getTime());
-  }, [containers, loans, selectedContainerId]);
-
-  const groupedUrgentDueLoans = React.useMemo(() => {
-    return {
-      today: urgentDueLoans.filter((loan) => loan.diffDays === 0),
-      oneDay: urgentDueLoans.filter((loan) => loan.diffDays === 1),
-      threeDays: urgentDueLoans.filter((loan) => loan.diffDays === 3),
-    };
-  }, [urgentDueLoans]);
 
   async function handleSaveLoan(payload) {
     try {
@@ -595,17 +659,39 @@ export default function App() {
     }
   }
 
-  async function handleAddPayment(loanId, payload) {
+  async function handleSavePayment(loanId, payload) {
     try {
       setError("");
       setSubmittingPaymentFor(loanId);
-      await addPayment(loanId, payload);
-      setPaymentModalLoan(null);
+      if (paymentModalState?.payment) {
+        await updatePaymentEntry(loanId, paymentModalState.payment.id, payload);
+      } else {
+        await addPayment(loanId, payload);
+      }
+      setPaymentModalState(null);
       await loadData();
     } catch (paymentError) {
       setError(paymentError.message);
     } finally {
       setSubmittingPaymentFor("");
+    }
+  }
+
+  async function handleDeletePayment() {
+    if (!paymentModalState?.loan || !paymentModalState?.payment) {
+      return;
+    }
+
+    try {
+      setError("");
+      setDeletingPaymentId(paymentModalState.payment.id);
+      await deletePaymentEntry(paymentModalState.loan.id, paymentModalState.payment.id);
+      setPaymentModalState(null);
+      await loadData();
+    } catch (paymentError) {
+      setError(paymentError.message);
+    } finally {
+      setDeletingPaymentId("");
     }
   }
 
@@ -679,16 +765,53 @@ export default function App() {
     setIsContainerModalOpen(true);
   }
 
-  function handleOpenPaymentModal(loan) {
-    setPaymentModalLoan(loan);
+  function handleOpenPaymentModal(loan, payment = null) {
+    setPaymentModalState({ loan, payment });
   }
 
-  function handleClosePaymentModal() {
-    if (submittingPaymentFor) {
+  function handleOpenPaymentEditor(loan, payment) {
+    setPaymentModalState({ loan, payment });
+  }
+
+  function handleOpenPaymentProofViewer(loan, payment, startIndex = 0) {
+    const proofUrls = getProofUrls(payment.proofImages);
+
+    if (proofUrls.length === 0) {
       return;
     }
 
-    setPaymentModalLoan(null);
+    setPaymentProofViewer({
+      loanName: loan.loanName,
+      proofImages: proofUrls,
+      index: startIndex,
+    });
+  }
+
+  function handleClosePaymentModal() {
+    if (submittingPaymentFor || deletingPaymentId) {
+      return;
+    }
+
+    setPaymentModalState(null);
+  }
+
+  function handleClosePaymentProofViewer() {
+    setPaymentProofViewer(null);
+  }
+
+  function handleShiftPaymentProof(direction) {
+    setPaymentProofViewer((current) => {
+      if (!current) {
+        return current;
+      }
+
+      const total = current.proofImages.length;
+      const nextIndex = (current.index + direction + total) % total;
+      return {
+        ...current,
+        index: nextIndex,
+      };
+    });
   }
 
   function handleCloseContainerModal() {
@@ -937,75 +1060,13 @@ export default function App() {
 
           {!isLoading && selectedContainerView === "loans" ? (
             <div className="grid gap-4">
-              <section className="rounded-3xl border border-slate-200 bg-white p-4 shadow-glass sm:rounded-[28px] sm:p-6">
-                <div className="mb-5 flex flex-col gap-4 border-b border-slate-100 pb-5 md:flex-row md:items-end md:justify-between">
-                  <div>
-                    <p className="mb-2 text-xs font-bold uppercase tracking-[0.22em] text-slateblue">Billing Alerts</p>
-                    <h3 className="text-lg font-semibold text-ink sm:text-xl">Upcoming billing dates in {selectedContainer.name}</h3>
-                    <p className="mt-1 max-w-2xl text-sm text-slate-600">
-                      A cleaner priority view of the loans that need attention first inside this container.
-                    </p>
-                  </div>
-                  <div className="grid grid-cols-3 gap-2 sm:gap-3">
-                    <div className="rounded-2xl border border-rose-200 bg-rose-50 px-3 py-2 text-center">
-                      <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-rose-700">Today</p>
-                      <strong className="mt-1 block text-lg font-semibold text-rose-900">{groupedUrgentDueLoans.today.length}</strong>
-                    </div>
-                    <div className="rounded-2xl border border-orange-200 bg-orange-50 px-3 py-2 text-center">
-                      <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-orange-700">1 Day</p>
-                      <strong className="mt-1 block text-lg font-semibold text-orange-900">{groupedUrgentDueLoans.oneDay.length}</strong>
-                    </div>
-                    <div className="rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2 text-center">
-                      <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-amber-700">3 Days</p>
-                      <strong className="mt-1 block text-lg font-semibold text-amber-900">{groupedUrgentDueLoans.threeDays.length}</strong>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="grid gap-4">
-                  <UrgentLoanGroup
-                    title="Loans due today"
-                    subtitle="These need the quickest attention."
-                    loans={groupedUrgentDueLoans.today}
-                    emptyMessage="No loans are due today inside this container."
-                    sectionClassName="border-rose-200 bg-gradient-to-r from-rose-50 via-white to-white"
-                    badgeClassName="bg-rose-100 text-rose-700"
-                    dotClassName="bg-rose-500"
-                    amountClassName="text-rose-700"
-                    rowClassName="border-rose-100 bg-white"
-                  />
-
-                  <UrgentLoanGroup
-                    title="Loans due in 1 day"
-                    subtitle="A short tomorrow list so upcoming dues are easy to spot."
-                    loans={groupedUrgentDueLoans.oneDay}
-                    emptyMessage="No loans are due in exactly 1 day inside this container."
-                    sectionClassName="border-orange-200 bg-gradient-to-r from-orange-50 via-white to-white"
-                    badgeClassName="bg-orange-100 text-orange-700"
-                    dotClassName="bg-orange-500"
-                    amountClassName="text-orange-700"
-                    rowClassName="border-orange-100 bg-white"
-                  />
-
-                  <UrgentLoanGroup
-                    title="Loans due in 3 days"
-                    subtitle="A short early warning list for bills approaching soon."
-                    loans={groupedUrgentDueLoans.threeDays}
-                    emptyMessage="No loans are due in exactly 3 days inside this container."
-                    sectionClassName="border-amber-200 bg-gradient-to-r from-amber-50 via-white to-white"
-                    badgeClassName="bg-amber-100 text-amber-800"
-                    dotClassName="bg-amber-500"
-                    amountClassName="text-amber-700"
-                    rowClassName="border-amber-100 bg-white"
-                  />
-                </div>
-              </section>
-
               {filteredLoans.map((loan) => (
                 <LoanCard
                   key={loan.id}
                   loan={loan}
                   onOpenPaymentModal={handleOpenPaymentModal}
+                  onEditPayment={handleOpenPaymentEditor}
+                  onViewPaymentProofs={handleOpenPaymentProofViewer}
                   onEdit={handleOpenEditLoanModal}
                   onDelete={handleRequestDeleteLoan}
                   isDeleting={deletingLoanId === loan.id}
@@ -1027,6 +1088,81 @@ export default function App() {
                   <StatCard label="Total principal amount" value={formatCurrency(summaryCards.totalPrincipalAmount)} />
                 </div>
               </SummarySection>
+
+              {loanTypeFilter !== "flexible" ? (
+                <SummarySection
+                  title={`Due In The Next ${dueWindowDays} Day${dueWindowDays === 1 ? "" : "s"}`}
+                  description="Use the selector to focus on the most urgent dues first, whether they are due tomorrow, within 3 days, or within the week."
+                >
+                  <div className="mb-4 flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+                    <label className="grid gap-2 text-sm font-semibold text-slate-700">
+                      Due range
+                      <select
+                        className="h-11 min-w-[160px] rounded-2xl border border-slate-200 bg-white px-4 text-sm text-ink outline-none transition focus:border-amber focus:ring-4 focus:ring-amber/20"
+                        value={dueWindowDays}
+                        onChange={(event) => setDueWindowDays(Number(event.target.value))}
+                      >
+                        <option value={1}>1 day</option>
+                        <option value={3}>3 days</option>
+                        <option value={7}>7 days</option>
+                      </select>
+                    </label>
+                    <div className="rounded-[24px] border border-amber-100 bg-amber-50/70 px-5 py-4">
+                      <p className="text-sm text-slate-500">Total amount needed</p>
+                      <strong className="mt-1 block text-2xl font-semibold text-ink">{formatCurrency(summaryInsights.dueSoonAmount)}</strong>
+                    </div>
+                  </div>
+                  <div className="grid gap-3">
+                    {summaryInsights.dueSoonLoans.length === 0 ? (
+                      <p className="text-sm text-slate-500">
+                        No loans are due within the next {dueWindowDays} day{dueWindowDays === 1 ? "" : "s"}.
+                      </p>
+                    ) : (
+                      <div className="grid grid-cols-2 gap-3">
+                        {summaryInsights.dueSoonLoans.map((loan) => (
+                          <div key={loan.id} className="rounded-[24px] border border-sky-100 bg-sky-50/80 p-4">
+                            <div className="grid gap-2">
+                              <div>
+                                <p className="font-semibold text-ink">{loan.loanName}</p>
+                                <p className="text-sm text-slate-500">Due {formatDate(loan.nextDueDate)}</p>
+                              </div>
+                              <strong className="text-base font-semibold text-slateblue">{formatCurrency(loan.monthlyPayment)}</strong>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </SummarySection>
+              ) : null}
+
+              {loanTypeFilter !== "flexible" ? (
+                <SummarySection title="Due This Month" description="This section totals loans whose current due date falls within the current month.">
+                  <div className="mb-4 rounded-[24px] border border-sky-100 bg-sky-50/80 p-4">
+                    <p className="text-sm text-slate-500">Total due this month</p>
+                    <strong className="mt-1 block text-2xl font-semibold text-ink">{formatCurrency(summaryInsights.dueThisMonthAmount)}</strong>
+                  </div>
+                  <div className="grid gap-3">
+                    {summaryInsights.dueThisMonthLoans.length === 0 ? (
+                      <p className="text-sm text-slate-500">No loans due this month under the current filter.</p>
+                    ) : (
+                      <div className="grid grid-cols-2 gap-3">
+                        {summaryInsights.dueThisMonthLoans.map((loan) => (
+                          <div key={loan.id} className="rounded-[24px] border border-sky-100 bg-sky-50/80 p-4">
+                            <div className="grid gap-2">
+                              <div>
+                                <p className="font-semibold text-ink">{loan.loanName}</p>
+                                <p className="text-sm text-slate-500">Due {formatDate(loan.nextDueDate)}</p>
+                              </div>
+                              <strong className="text-base font-semibold text-slateblue">{formatCurrency(loan.monthlyPayment)}</strong>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </SummarySection>
+              ) : null}
 
               <SummarySection title="Visual Snapshot" description="A quick visual read on portfolio mix and overall progress for the loans currently displayed.">
                 <div className="grid gap-5 lg:grid-cols-[1.2fr_0.8fr]">
@@ -1170,51 +1306,6 @@ export default function App() {
 
               {loanTypeFilter !== "flexible" ? (
                 <>
-                  <SummarySection
-                    title={`Due In The Next ${dueWindowDays} Day${dueWindowDays === 1 ? "" : "s"}`}
-                    description="Use the selector to focus on the most urgent dues first, whether they are due tomorrow, within 3 days, or within the week."
-                  >
-                    <div className="mb-4 flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
-                      <label className="grid gap-2 text-sm font-semibold text-slate-700">
-                        Due range
-                        <select
-                          className="h-11 min-w-[160px] rounded-2xl border border-slate-200 bg-white px-4 text-sm text-ink outline-none transition focus:border-amber focus:ring-4 focus:ring-amber/20"
-                          value={dueWindowDays}
-                          onChange={(event) => setDueWindowDays(Number(event.target.value))}
-                        >
-                          <option value={1}>1 day</option>
-                          <option value={3}>3 days</option>
-                          <option value={7}>7 days</option>
-                        </select>
-                      </label>
-                      <div className="rounded-[24px] border border-amber-100 bg-amber-50/70 px-5 py-4">
-                        <p className="text-sm text-slate-500">Total amount needed</p>
-                        <strong className="mt-1 block text-2xl font-semibold text-ink">{formatCurrency(summaryInsights.dueSoonAmount)}</strong>
-                      </div>
-                    </div>
-                    <div className="grid gap-3">
-                      {summaryInsights.dueSoonLoans.length === 0 ? (
-                        <p className="text-sm text-slate-500">
-                          No loans are due within the next {dueWindowDays} day{dueWindowDays === 1 ? "" : "s"}.
-                        </p>
-                      ) : (
-                        <div className="grid grid-cols-2 gap-3">
-                          {summaryInsights.dueSoonLoans.map((loan) => (
-                            <div key={loan.id} className="rounded-[24px] border border-sky-100 bg-sky-50/80 p-4">
-                              <div className="grid gap-2">
-                                <div>
-                                  <p className="font-semibold text-ink">{loan.loanName}</p>
-                                  <p className="text-sm text-slate-500">Due {formatDate(loan.nextDueDate)}</p>
-                                </div>
-                                <strong className="text-base font-semibold text-slateblue">{formatCurrency(loan.monthlyPayment)}</strong>
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  </SummarySection>
-
                   <SummarySection title="Interest Exposure" description="A comparison of how much interest each visible loan is carrying.">
                     <div className="grid gap-3">
                       {filteredLoans.length === 0 ? (
@@ -1237,52 +1328,55 @@ export default function App() {
                     </div>
                   </SummarySection>
 
-                  <SummarySection title="Due This Month" description="This section totals loans whose current due date falls within the current month.">
-                    <div className="mb-4 rounded-[24px] border border-sky-100 bg-sky-50/80 p-4">
-                      <p className="text-sm text-slate-500">Total due this month</p>
-                      <strong className="mt-1 block text-2xl font-semibold text-ink">{formatCurrency(summaryInsights.dueThisMonthAmount)}</strong>
+                  <SummarySection
+                    title="Overdue Loans"
+                    description="These loans are already past due. This section combines the overdue installment with estimated lender-specific penalties so you can see the current overdue exposure more clearly."
+                  >
+                    <div className="mb-4 grid gap-3 md:grid-cols-2">
+                      <div className="rounded-[24px] border border-rose-200 bg-rose-50/80 p-4">
+                        <p className="text-sm text-slate-500">Estimated overdue total</p>
+                        <strong className="mt-1 block text-2xl font-semibold text-rose-700">{formatCurrency(summaryInsights.overdueAmountTotal)}</strong>
+                      </div>
+                      <div className="rounded-[24px] border border-orange-200 bg-orange-50/80 p-4">
+                        <p className="text-sm text-slate-500">Estimated penalties</p>
+                        <strong className="mt-1 block text-2xl font-semibold text-orange-700">{formatCurrency(summaryInsights.overduePenaltyTotal)}</strong>
+                      </div>
                     </div>
-                    <div className="grid gap-3">
-                      {summaryInsights.dueThisMonthLoans.length === 0 ? (
-                        <p className="text-sm text-slate-500">No loans due this month under the current filter.</p>
-                      ) : (
-                        <div className="grid grid-cols-2 gap-3">
-                          {summaryInsights.dueThisMonthLoans.map((loan) => (
-                            <div key={loan.id} className="rounded-[24px] border border-sky-100 bg-sky-50/80 p-4">
-                              <div className="grid gap-2">
-                                <div>
-                                  <p className="font-semibold text-ink">{loan.loanName}</p>
-                                  <p className="text-sm text-slate-500">Due {formatDate(loan.nextDueDate)}</p>
-                                </div>
-                                <strong className="text-base font-semibold text-slateblue">{formatCurrency(loan.monthlyPayment)}</strong>
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  </SummarySection>
-
-                  <SummarySection title="Overdue Loans" description="These loans are already past due and show how long they have been overdue.">
                     <div className="grid gap-3">
                       {summaryInsights.overdueLoans.length === 0 ? (
                         <p className="text-sm text-slate-500">No overdue loans under the current filter.</p>
                       ) : (
                         summaryInsights.overdueLoans.map((loan) => (
                           <div key={loan.id} className="rounded-[24px] border border-rose-200 bg-rose-50/70 p-4">
-                            <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+                            <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
                               <div>
                                 <p className="font-semibold text-ink">{loan.loanName}</p>
                                 <p className="text-sm text-rose-700">
                                   Due {formatDate(loan.nextDueDate)} • {loan.daysPastDue} day{loan.daysPastDue === 1 ? "" : "s"} overdue
                                 </p>
                               </div>
-                              <strong className="text-base font-semibold text-rose-700">{formatCurrency(loan.monthlyPayment)}</strong>
+                              <div className="grid gap-3 text-sm md:grid-cols-3 md:text-right">
+                                <div>
+                                  <p className="text-slate-500">Installment due</p>
+                                  <strong className="text-base font-semibold text-ink">{formatCurrency(loan.monthlyPayment)}</strong>
+                                </div>
+                                <div>
+                                  <p className="text-slate-500">Penalty</p>
+                                  <strong className="text-base font-semibold text-orange-700">{formatCurrency(loan.estimatedPenalty)}</strong>
+                                </div>
+                                <div>
+                                  <p className="text-slate-500">Overdue total</p>
+                                  <strong className="text-base font-semibold text-rose-700">{formatCurrency(loan.overdueAmount)}</strong>
+                                </div>
+                              </div>
                             </div>
                           </div>
                         ))
                       )}
                     </div>
+                    <p className="mt-3 text-xs leading-5 text-slate-500">
+                      Penalties are estimated from the configured lender rules. For SLOAN, the app currently uses the lower 2.5% monthly rate as a conservative estimate.
+                    </p>
                   </SummarySection>
 
                   <SummarySection
@@ -1378,27 +1472,105 @@ export default function App() {
         </div>
       ) : null}
 
-      {paymentModalLoan ? (
+      {paymentModalState ? (
         <div className="fixed inset-0 z-20 flex items-start justify-center overflow-y-auto bg-ink/45 p-3 backdrop-blur-sm sm:p-6" onClick={handleClosePaymentModal}>
           <div className="scrollbar-hide my-auto w-full max-w-3xl overflow-y-auto rounded-[28px]" onClick={(event) => event.stopPropagation()}>
             <section className="rounded-3xl border border-white/70 bg-white/95 p-4 shadow-glass backdrop-blur sm:rounded-[28px] sm:p-6">
               <div className="mb-4 flex items-start justify-between gap-3">
                 <div>
-                  <p className="mb-2 text-xs font-bold uppercase tracking-[0.22em] text-slate-500">Add Payment</p>
-                  <h2 className="text-xl font-semibold text-ink sm:text-2xl">{paymentModalLoan.loanName}</h2>
+                  <p className="mb-2 text-xs font-bold uppercase tracking-[0.22em] text-slate-500">
+                    {paymentModalState.payment ? "Edit Payment" : "Add Payment"}
+                  </p>
+                  <h2 className="text-xl font-semibold text-ink sm:text-2xl">{paymentModalState.loan.loanName}</h2>
                 </div>
                 <button
                   type="button"
                   className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-slate-100 text-ink transition hover:-translate-y-0.5 hover:bg-slate-200 focus:outline-none focus:ring-4 focus:ring-slate-200 disabled:cursor-wait disabled:opacity-70"
                   onClick={handleClosePaymentModal}
-                  disabled={Boolean(submittingPaymentFor)}
+                  disabled={Boolean(submittingPaymentFor || deletingPaymentId)}
                   aria-label="Close payment modal"
                   title="Close"
                 >
                   <CloseIcon />
                 </button>
               </div>
-              <PaymentForm loanId={paymentModalLoan.id} onSubmit={handleAddPayment} isSubmitting={submittingPaymentFor === paymentModalLoan.id} />
+              <PaymentForm
+                loanId={paymentModalState.loan.id}
+                initialValues={paymentModalState.payment}
+                onSubmit={handleSavePayment}
+                isSubmitting={submittingPaymentFor === paymentModalState.loan.id}
+                submitLabel={paymentModalState.payment ? "Save payment" : "Add payment"}
+                onDelete={paymentModalState.payment ? handleDeletePayment : null}
+                isDeleting={deletingPaymentId === paymentModalState.payment?.id}
+              />
+            </section>
+          </div>
+        </div>
+      ) : null}
+
+      {paymentProofViewer ? (
+        <div className="fixed inset-0 z-20 flex items-center justify-center bg-ink/60 p-3 backdrop-blur-sm sm:p-6" onClick={handleClosePaymentProofViewer}>
+          <div className="w-full max-w-4xl rounded-[28px]" onClick={(event) => event.stopPropagation()}>
+            <section className="rounded-[28px] border border-white/70 bg-white/95 p-4 shadow-glass backdrop-blur sm:p-6">
+              <div className="mb-4 flex items-start justify-between gap-3">
+                <div>
+                  <p className="mb-2 text-xs font-bold uppercase tracking-[0.22em] text-slate-500">Proof of Payment</p>
+                  <h2 className="text-xl font-semibold text-ink sm:text-2xl">{paymentProofViewer.loanName}</h2>
+                </div>
+                <button
+                  type="button"
+                  className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-slate-100 text-ink transition hover:-translate-y-0.5 hover:bg-slate-200 focus:outline-none focus:ring-4 focus:ring-slate-200"
+                  onClick={handleClosePaymentProofViewer}
+                  aria-label="Close proof viewer"
+                >
+                  <CloseIcon />
+                </button>
+              </div>
+              <div className="grid gap-4">
+                <div className="relative overflow-hidden rounded-[24px] border border-slate-200 bg-slate-50">
+                  <img
+                    src={paymentProofViewer.proofImages[paymentProofViewer.index]}
+                    alt={`Proof of payment ${paymentProofViewer.index + 1}`}
+                    className="max-h-[70vh] w-full object-contain"
+                  />
+                  {paymentProofViewer.proofImages.length > 1 ? (
+                    <>
+                      <button
+                        type="button"
+                        className="absolute left-3 top-1/2 inline-flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full bg-ink/75 text-white transition hover:bg-ink"
+                        onClick={() => handleShiftPaymentProof(-1)}
+                        aria-label="Previous proof image"
+                      >
+                        <CarouselArrowIcon direction="left" />
+                      </button>
+                      <button
+                        type="button"
+                        className="absolute right-3 top-1/2 inline-flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full bg-ink/75 text-white transition hover:bg-ink"
+                        onClick={() => handleShiftPaymentProof(1)}
+                        aria-label="Next proof image"
+                      >
+                        <CarouselArrowIcon direction="right" />
+                      </button>
+                    </>
+                  ) : null}
+                </div>
+                {paymentProofViewer.proofImages.length > 1 ? (
+                  <div className="grid grid-cols-3 gap-3 sm:grid-cols-4">
+                    {paymentProofViewer.proofImages.map((proofImage, index) => (
+                      <button
+                        key={`${proofImage.slice(0, 16)}-${index}`}
+                        type="button"
+                        className={`overflow-hidden rounded-2xl border transition ${
+                          paymentProofViewer.index === index ? "border-slateblue ring-2 ring-slate-200" : "border-slate-200"
+                        }`}
+                        onClick={() => setPaymentProofViewer((current) => (current ? { ...current, index } : current))}
+                      >
+                        <img src={proofImage} alt={`Proof thumbnail ${index + 1}`} className="h-20 w-full object-cover" />
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
             </section>
           </div>
         </div>

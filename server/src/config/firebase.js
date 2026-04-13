@@ -3,6 +3,7 @@ import fs from "node:fs";
 
 let firestoreInstance = null;
 let authInstance = null;
+let storageBucketInstance = null;
 
 function readServiceAccountFile() {
   const serviceAccountPath = process.env.FIREBASE_SERVICE_ACCOUNT_PATH;
@@ -55,6 +56,7 @@ function getAdminApp() {
   if (!admin.apps.length) {
     admin.initializeApp({
       credential: admin.credential.cert(credentials),
+      storageBucket: process.env.FIREBASE_STORAGE_BUCKET,
     });
   }
 
@@ -77,4 +79,13 @@ export function getAdminAuth() {
 
   authInstance = getAdminApp().auth();
   return authInstance;
+}
+
+export function getStorageBucket() {
+  if (storageBucketInstance) {
+    return storageBucketInstance;
+  }
+
+  storageBucketInstance = getAdminApp().storage().bucket();
+  return storageBucketInstance;
 }

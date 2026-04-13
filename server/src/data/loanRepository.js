@@ -1,11 +1,129 @@
 import { randomUUID } from "node:crypto";
-import { getFirestore } from "../config/firebase.js";
+import { getFirestore, getStorageBucket } from "../config/firebase.js";
 import { advanceDueDate, getLoanStatus } from "../utils/loanStatus.js";
 
 const COLLECTION_NAME = "loans";
 
 function roundToTwo(value) {
   return Math.round((Number(value) + Number.EPSILON) * 100) / 100;
+}
+
+function getTotalInstallments(loan) {
+  if (Number(loan.monthlyPayment || 0) <= 0) {
+    return Number(loan.termCount || 0);
+  }
+
+  return Math.max(Math.round(Number(loan.totalPayable || 0) / Number(loan.monthlyPayment || 1)), 0);
+}
+
+function sortPayments(payments) {
+  return [...payments].sort((left, right) => {
+    return (
+      new Date(right.paymentDate || right.createdAt || 0).getTime() -
+      new Date(left.paymentDate || left.createdAt || 0).getTime()
+    );
+  });
+}
+
+function normalizeProofImages(value) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .map((item) => {
+      if (typeof item === "string") {
+        return {
+          url: item,
+          path: "",
+        };
+      }
+
+      if (item && typeof item === "object" && typeof item.url === "string") {
+        return {
+          url: item.url,
+          path: typeof item.path === "string" ? item.path : "",
+        };
+      }
+
+      return null;
+    })
+    .filter(Boolean)
+    .slice(0, 3);
+}
+
+function getProofPaths(proofImages) {
+  return normalizeProofImages(proofImages)
+    .map((proofImage) => proofImage.path)
+    .filter(Boolean);
+}
+
+async function deleteProofFiles(paths) {
+  if (!Array.isArray(paths) || paths.length === 0) {
+    return;
+  }
+
+  const bucket = getStorageBucket();
+
+  await Promise.all(
+    paths.map(async (path) => {
+      try {
+        await bucket.file(path).delete();
+      } catch (error) {
+        if (error?.code !== 404) {
+          throw error;
+        }
+      }
+    })
+  );
+}
+
+function normalizePaymentInput(input, existingPayment = null) {
+  const now = new Date().toISOString();
+
+  return {
+    id: existingPayment?.id || randomUUID(),
+    amount: roundToTwo(Number(input.amount || 0)),
+    paymentDate: input.paymentDate,
+    note: input.note || "",
+    proofImages: normalizeProofImages(input.proofImages),
+    createdAt: existingPayment?.createdAt || now,
+    updatedAt: now,
+  };
+}
+
+function buildUpdatedLoanFromPayments(existingLoan, payments) {
+  const orderedPayments = sortPayments(payments);
+  const totalPaid = roundToTwo(orderedPayments.reduce((sum, payment) => sum + Number(payment.amount || 0), 0));
+  const remainingBalance = roundToTwo(Math.max(Number(existingLoan.totalPayable || 0) - totalPaid, 0));
+  const totalInstallments = getTotalInstallments(existingLoan);
+  const nextTermCount =
+    existingLoan.loanType === "fixed" ? Math.max(totalInstallments - orderedPayments.length, 0) : Number(existingLoan.termCount || 0);
+
+  let nextDueDate = existingLoan.loanType === "fixed" ? existingLoan.firstRepaymentDate || existingLoan.nextDueDate || "" : "";
+
+  if (existingLoan.loanType === "fixed" && nextDueDate && remainingBalance > 0) {
+    for (let index = 0; index < orderedPayments.length; index += 1) {
+      nextDueDate = advanceDueDate(nextDueDate, existingLoan.paymentFrequency);
+    }
+  }
+
+  if (remainingBalance <= 0) {
+    nextDueDate = "";
+  }
+
+  const updatedAt = new Date().toISOString();
+
+  return {
+    ...existingLoan,
+    payments: orderedPayments,
+    remainingBalance,
+    termCount: nextTermCount,
+    termLabel: existingLoan.loanType === "fixed" ? `${nextTermCount} ${existingLoan.paymentFrequency}` : existingLoan.termLabel,
+    nextDueDate,
+    updatedAt,
+    status: getLoanStatus(existingLoan.loanType === "fixed" ? nextDueDate : "", remainingBalance),
+  };
 }
 
 function normalizeLoanInput(input, workspaceId, createdBy, existingPayments = [], existingCreatedAt = null) {
@@ -62,6 +180,7 @@ function serializeLoan(doc) {
       ? data.payments.map((payment) => ({
           ...payment,
           amount: Number(payment.amount || 0),
+          proofImages: normalizeProofImages(payment.proofImages),
         }))
       : [],
     status: getLoanStatus(data.loanType === "fixed" ? data.nextDueDate : "", remainingBalance),
@@ -135,33 +254,8 @@ export async function addPayment(userId, loanId, input) {
     return null;
   }
 
-  const paymentAmount = Number(input.amount);
-  const updatedBalance = Math.max(existingLoan.remainingBalance - paymentAmount, 0);
-
-  const nextPayment = {
-    id: randomUUID(),
-    amount: paymentAmount,
-    paymentDate: input.paymentDate,
-    note: input.note || "",
-    createdAt: new Date().toISOString(),
-  };
-
-  const payments = [nextPayment, ...existingLoan.payments];
-  const nextTermCount =
-    existingLoan.loanType === "fixed" ? Math.max(Number(existingLoan.termCount || 0) - 1, 0) : Number(existingLoan.termCount || 0);
-  const nextDueDate =
-    existingLoan.loanType === "fixed" && updatedBalance > 0 ? advanceDueDate(existingLoan.nextDueDate, existingLoan.paymentFrequency) : "";
-  const updatedLoan = {
-    ...existingLoan,
-    payments,
-    remainingBalance: updatedBalance,
-    termCount: nextTermCount,
-    termLabel: existingLoan.loanType === "fixed" ? `${nextTermCount} ${existingLoan.paymentFrequency}` : existingLoan.termLabel,
-    nextDueDate,
-    updatedAt: new Date().toISOString(),
-  };
-
-  updatedLoan.status = getLoanStatus(updatedLoan.loanType === "fixed" ? updatedLoan.nextDueDate : "", updatedLoan.remainingBalance);
+  const nextPayment = normalizePaymentInput(input);
+  const updatedLoan = buildUpdatedLoanFromPayments(existingLoan, [nextPayment, ...existingLoan.payments]);
 
   await docRef.update({
     payments: updatedLoan.payments,
@@ -174,6 +268,94 @@ export async function addPayment(userId, loanId, input) {
   });
 
   return updatedLoan;
+}
+
+export async function updatePayment(userId, loanId, paymentId, input) {
+  const docRef = getLoanCollection().doc(loanId);
+  const doc = await docRef.get();
+
+  if (!doc.exists) {
+    return null;
+  }
+
+  const existingLoan = serializeLoan(doc);
+
+  if (existingLoan.workspaceId !== userId) {
+    return null;
+  }
+
+  const existingPayment = existingLoan.payments.find((payment) => payment.id === paymentId);
+
+  if (!existingPayment) {
+    return null;
+  }
+
+  const payments = existingLoan.payments.map((payment) =>
+    payment.id === paymentId ? normalizePaymentInput(input, existingPayment) : payment
+  );
+  const updatedLoan = buildUpdatedLoanFromPayments(existingLoan, payments);
+  const removedProofPaths = getProofPaths(existingPayment.proofImages).filter(
+    (path) => !getProofPaths(input.proofImages).includes(path)
+  );
+
+  await docRef.update({
+    payments: updatedLoan.payments,
+    remainingBalance: updatedLoan.remainingBalance,
+    termCount: updatedLoan.termCount,
+    termLabel: updatedLoan.termLabel,
+    nextDueDate: updatedLoan.nextDueDate,
+    updatedAt: updatedLoan.updatedAt,
+    status: updatedLoan.status,
+  });
+
+  await deleteProofFiles(removedProofPaths);
+
+  return {
+    loan: updatedLoan,
+    payment: updatedLoan.payments.find((payment) => payment.id === paymentId) || null,
+  };
+}
+
+export async function deletePayment(userId, loanId, paymentId) {
+  const docRef = getLoanCollection().doc(loanId);
+  const doc = await docRef.get();
+
+  if (!doc.exists) {
+    return null;
+  }
+
+  const existingLoan = serializeLoan(doc);
+
+  if (existingLoan.workspaceId !== userId) {
+    return null;
+  }
+
+  const existingPayment = existingLoan.payments.find((payment) => payment.id === paymentId);
+
+  if (!existingPayment) {
+    return null;
+  }
+
+  const payments = existingLoan.payments.filter((payment) => payment.id !== paymentId);
+  const updatedLoan = buildUpdatedLoanFromPayments(existingLoan, payments);
+  const removedProofPaths = getProofPaths(existingPayment.proofImages);
+
+  await docRef.update({
+    payments: updatedLoan.payments,
+    remainingBalance: updatedLoan.remainingBalance,
+    termCount: updatedLoan.termCount,
+    termLabel: updatedLoan.termLabel,
+    nextDueDate: updatedLoan.nextDueDate,
+    updatedAt: updatedLoan.updatedAt,
+    status: updatedLoan.status,
+  });
+
+  await deleteProofFiles(removedProofPaths);
+
+  return {
+    loan: updatedLoan,
+    payment: existingPayment,
+  };
 }
 
 export async function deleteLoan(userId, loanId) {
