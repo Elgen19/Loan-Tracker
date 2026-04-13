@@ -190,15 +190,17 @@ export default function PaymentForm({
 
   return (
     <form className="grid gap-4" onSubmit={handleSubmit}>
-      <div className="grid gap-3 lg:grid-cols-[repeat(3,minmax(0,1fr))]">
-        <label className="grid gap-2 text-sm font-semibold text-slate-700">
-          Amount
-          <input className={fieldClassName} name="amount" type="number" min="0" step="0.01" value={formData.amount} onChange={handleChange} required />
-        </label>
-        <label className="grid gap-2 text-sm font-semibold text-slate-700">
-          Payment date
-          <input className={fieldClassName} name="paymentDate" type="date" value={formData.paymentDate} onChange={handleChange} required />
-        </label>
+      <div className="grid gap-3">
+        <div className="grid grid-cols-2 gap-3">
+          <label className="grid gap-2 text-sm font-semibold text-slate-700">
+            Amount
+            <input className={fieldClassName} name="amount" type="number" min="0" step="0.01" value={formData.amount} onChange={handleChange} required />
+          </label>
+          <label className="grid gap-2 text-sm font-semibold text-slate-700">
+            Payment date
+            <input className={fieldClassName} name="paymentDate" type="date" value={formData.paymentDate} onChange={handleChange} required />
+          </label>
+        </div>
         <label className="grid gap-2 text-sm font-semibold text-slate-700">
           Note
           <input className={fieldClassName} name="note" value={formData.note} onChange={handleChange} placeholder="Optional" />

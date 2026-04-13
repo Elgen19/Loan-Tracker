@@ -222,9 +222,15 @@ export default function LoanCard({
                     className="flex cursor-pointer flex-wrap items-center justify-between gap-x-3 gap-y-2 rounded-2xl border border-sky-100 bg-sky-50/90 px-4 py-3 transition hover:border-cyan-300 hover:bg-white"
                     onClick={() => onEditPayment(loan, payment)}
                   >
-                    <strong className="text-sm font-semibold text-ink sm:text-base">{formatCurrency(payment.amount)}</strong>
-                    <span className="text-sm text-slate-500">{formatDate(payment.paymentDate)}</span>
-                    <p className="min-w-0 flex-1 text-sm text-slate-600">{payment.note || "Payment logged"}</p>
+                    <div className="flex min-w-0 flex-1 items-center gap-3 sm:hidden">
+                      <strong className="text-sm font-semibold text-ink">{formatCurrency(payment.amount)}</strong>
+                      <span className="text-sm text-slate-500">{formatDate(payment.paymentDate)}</span>
+                    </div>
+                    <div className="hidden min-w-0 flex-1 items-center gap-3 sm:flex">
+                      <strong className="text-sm font-semibold text-ink sm:text-base">{formatCurrency(payment.amount)}</strong>
+                      <span className="text-sm text-slate-500">{formatDate(payment.paymentDate)}</span>
+                      <p className="min-w-0 flex-1 text-sm text-slate-600">{payment.note || "Payment logged"}</p>
+                    </div>
                     <div className="ml-auto flex items-center gap-2">
                       {getProofUrls(payment.proofImages).length > 0 ? (
                         <button
