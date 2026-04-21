@@ -244,12 +244,14 @@ function BackIcon() {
 
 function SummarySection({ title, description, children }) {
   return (
-    <section className="rounded-3xl border border-white/70 bg-white/90 p-4 shadow-glass backdrop-blur sm:rounded-[28px] sm:p-5">
-      <div className="mb-4">
+    <section className="relative overflow-hidden rounded-3xl border border-white/80 bg-white/95 p-4 shadow-glass backdrop-blur sm:rounded-[28px] sm:p-6">
+      <div className="pointer-events-none absolute -right-10 top-0 h-24 w-24 rounded-full bg-gradient-to-br from-sky-100/70 to-transparent" />
+      <div className="relative mb-5 border-b border-slate-100 pb-4">
+        <p className="mb-2 text-[11px] font-bold uppercase tracking-[0.22em] text-slate-500">Summary Section</p>
         <h3 className="text-lg font-semibold text-ink sm:text-xl">{title}</h3>
-        {description ? <p className="mt-1 text-sm text-slate-500">{description}</p> : null}
+        {description ? <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-500">{description}</p> : null}
       </div>
-      {children}
+      <div className="relative">{children}</div>
     </section>
   );
 }
@@ -289,6 +291,13 @@ function createNavigationState(selectedContainerId, selectedContainerView) {
   };
 }
 
+function formatMonthLabel(date) {
+  return new Intl.DateTimeFormat("en-US", {
+    month: "long",
+    year: "numeric",
+  }).format(date);
+}
+
 export default function App() {
   const [user, setUser] = React.useState(null);
   const [isAuthLoading, setIsAuthLoading] = React.useState(true);
@@ -314,6 +323,7 @@ export default function App() {
   const [statusFilter, setStatusFilter] = React.useState("all");
   const [loanTypeFilter, setLoanTypeFilter] = React.useState("all");
   const [dueWindowDays, setDueWindowDays] = React.useState(7);
+  const [dueMonthCarouselIndex, setDueMonthCarouselIndex] = React.useState(0);
   const [error, setError] = React.useState("");
   const hasInitializedHistoryRef = React.useRef(false);
   const isHandlingPopStateRef = React.useRef(false);
@@ -570,6 +580,71 @@ export default function App() {
     const completionRate =
       summaryCards.totalAmountPayable > 0 ? (summaryCards.totalAmountPaid / summaryCards.totalAmountPayable) * 100 : 0;
 
+    const scheduleEndDate = new Date(today.getFullYear(), 11, 31);
+    scheduleEndDate.setHours(0, 0, 0, 0);
+
+    const restOfYearSchedule = fixedLoans.flatMap((loan) => {
+      if (!loan.nextDueDate || Number(loan.termCount || 0) <= 0 || Number(loan.remainingBalance || 0) <= 0) {
+        return [];
+      }
+
+      const scheduleItems = [];
+      let dueDate = normalizeDate(loan.nextDueDate);
+
+      for (let installmentIndex = 0; installmentIndex < Number(loan.termCount || 0) && dueDate; installmentIndex += 1) {
+        if (dueDate.getTime() > scheduleEndDate.getTime()) {
+          break;
+        }
+
+        if (dueDate.getTime() >= today.getTime()) {
+          scheduleItems.push({
+            loanId: loan.id,
+            loanName: loan.loanName,
+            monthlyPayment: Number(loan.monthlyPayment || 0),
+            dueDate: dueDate.toISOString(),
+            dueDay: dueDate.getDate(),
+            monthLabel: formatMonthLabel(dueDate),
+          });
+        }
+
+        dueDate = shiftDateByFrequency(dueDate, loan.paymentFrequency, 1);
+      }
+
+      return scheduleItems;
+    });
+
+    const restOfYearByLoan = fixedLoans
+      .map((loan) => {
+        const scheduledPayments = restOfYearSchedule.filter((item) => item.loanId === loan.id);
+
+        return {
+          ...loan,
+          scheduledPayments,
+          remainingYearTotal: scheduledPayments.reduce((sum, item) => sum + item.monthlyPayment, 0),
+        };
+      })
+      .filter((loan) => loan.scheduledPayments.length > 0)
+      .sort((left, right) => new Date(left.scheduledPayments[0].dueDate).getTime() - new Date(right.scheduledPayments[0].dueDate).getTime());
+
+    const monthCursor = new Date(today.getFullYear(), today.getMonth(), 1);
+    const dueByCycleMonthCards = [];
+
+    while (monthCursor.getFullYear() === today.getFullYear()) {
+      const monthLabel = formatMonthLabel(monthCursor);
+      const fifteenth = restOfYearSchedule.filter((item) => item.monthLabel === monthLabel && item.dueDay >= 1 && item.dueDay <= 15);
+      const thirtieth = restOfYearSchedule.filter((item) => item.monthLabel === monthLabel && item.dueDay >= 16);
+
+      dueByCycleMonthCards.push({
+        monthLabel,
+        fifteenth,
+        thirtieth,
+        fifteenthTotal: fifteenth.reduce((sum, item) => sum + item.monthlyPayment, 0),
+        thirtiethTotal: thirtieth.reduce((sum, item) => sum + item.monthlyPayment, 0),
+      });
+
+      monthCursor.setMonth(monthCursor.getMonth() + 1);
+    }
+
     let urgentAction = "No urgent payment actions right now.";
 
     if (overdueCount > 0) {
@@ -604,8 +679,22 @@ export default function App() {
       urgentAction,
       overduePenaltyTotal: overdueLoans.reduce((sum, loan) => sum + loan.estimatedPenalty, 0),
       overdueAmountTotal: overdueLoans.reduce((sum, loan) => sum + loan.overdueAmount, 0),
+      restOfYearSchedule,
+      restOfYearByLoan,
+      restOfYearTotal: restOfYearSchedule.reduce((sum, item) => sum + item.monthlyPayment, 0),
+      dueByCycleMonthCards,
     };
   }, [dueWindowDays, filteredLoans, summaryCards]);
+
+  React.useEffect(() => {
+    setDueMonthCarouselIndex((current) => {
+      if (summaryInsights.dueByCycleMonthCards.length === 0) {
+        return 0;
+      }
+
+      return Math.min(current, summaryInsights.dueByCycleMonthCards.length - 1);
+    });
+  }, [summaryInsights.dueByCycleMonthCards.length]);
 
   const containerCards = React.useMemo(() => {
     return containers.map((container) => {
@@ -1023,14 +1112,15 @@ export default function App() {
               </div>
             </div>
           ) : (
-            <div className="rounded-3xl border border-white/70 bg-white/90 p-4 shadow-glass backdrop-blur sm:rounded-[28px] sm:p-5">
-              <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+            <div className="relative overflow-hidden rounded-3xl border border-white/80 bg-gradient-to-br from-white via-sky-50/60 to-amber-50/40 p-4 shadow-glass backdrop-blur sm:rounded-[28px] sm:p-6">
+              <div className="pointer-events-none absolute -right-16 -top-16 h-40 w-40 rounded-full bg-gradient-to-br from-amber/20 to-transparent" />
+              <div className="relative flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
                 <div>
                   <p className="mb-2 text-xs font-bold uppercase tracking-[0.22em] text-slate-500">Summaries</p>
-                  <h3 className="text-xl font-semibold text-ink sm:text-2xl">Summary dashboard for {selectedContainer.name}</h3>
+                  <h3 className="text-xl font-semibold text-ink sm:text-3xl">Summary dashboard for {selectedContainer.name}</h3>
                   <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-500">
-                    These summaries focus on progress, payment activity, balance extremes, and the most urgent dues. The
-                    sections below adapt to the loan-type filter so flexible loans stay free of fixed-only due logic.
+                    A cleaner view of what matters most: upcoming dues, remaining yearly commitments, payment progress,
+                    and overdue exposure. The sections below adapt to the loan-type filter so flexible loans stay free of fixed-only due logic.
                   </p>
                 </div>
                 <label className="grid gap-2 text-sm font-semibold text-slate-700">
@@ -1137,36 +1227,162 @@ export default function App() {
               ) : null}
 
               {loanTypeFilter !== "flexible" ? (
-                <SummarySection title="Due This Month" description="This section totals loans whose current due date falls within the current month.">
-                  <div className="mb-4 rounded-[24px] border border-sky-100 bg-sky-50/80 p-4">
-                    <p className="text-sm text-slate-500">Total due this month</p>
-                    <strong className="mt-1 block text-2xl font-semibold text-ink">{formatCurrency(summaryInsights.dueThisMonthAmount)}</strong>
-                  </div>
-                  <div className="grid gap-3">
-                    {summaryInsights.dueThisMonthLoans.length === 0 ? (
-                      <p className="text-sm text-slate-500">No loans due this month under the current filter.</p>
-                    ) : (
-                      <div className="grid grid-cols-2 gap-3">
-                        {summaryInsights.dueThisMonthLoans.map((loan) => (
-                          <div key={loan.id} className="rounded-[24px] border border-sky-100 bg-sky-50/80 p-4">
-                            <div className="grid gap-2">
-                              <div>
-                                <p className="font-semibold text-ink">{loan.loanName}</p>
-                                <p className="text-sm text-slate-500">Due {formatDate(loan.nextDueDate)}</p>
+                <>
+                  <SummarySection title="Due This Month" description="This section totals loans whose current due date falls within the current month.">
+                    <div className="mb-5 rounded-[24px] border border-sky-100 bg-gradient-to-r from-sky-50 to-white p-4">
+                      <p className="text-sm text-slate-500">Total due this month</p>
+                      <strong className="mt-1 block text-2xl font-semibold text-ink">{formatCurrency(summaryInsights.dueThisMonthAmount)}</strong>
+                    </div>
+                    <div className="grid gap-3">
+                      {summaryInsights.dueThisMonthLoans.length === 0 ? (
+                        <p className="text-sm text-slate-500">No loans due this month under the current filter.</p>
+                      ) : (
+                        <div className="grid gap-3 sm:grid-cols-2">
+                          {summaryInsights.dueThisMonthLoans.map((loan) => (
+                            <div key={loan.id} className="rounded-[24px] border border-sky-100 bg-sky-50/70 p-4">
+                              <div className="grid gap-2">
+                                <div>
+                                  <p className="font-semibold text-ink">{loan.loanName}</p>
+                                  <p className="text-sm text-slate-500">Due {formatDate(loan.nextDueDate)}</p>
+                                </div>
+                                <strong className="text-base font-semibold text-slateblue">{formatCurrency(loan.monthlyPayment)}</strong>
                               </div>
-                              <strong className="text-base font-semibold text-slateblue">{formatCurrency(loan.monthlyPayment)}</strong>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </SummarySection>
+
+                  <SummarySection
+                    title="15th And 30th Due Board"
+                    description="Browse each month to see which loans fall within the 1st to 15th window and which ones fall within the 16th to month-end window."
+                  >
+                    {summaryInsights.dueByCycleMonthCards.length === 0 ? (
+                      <p className="text-sm text-slate-500">No scheduled 15th or 30th dues for the rest of the year.</p>
+                    ) : (
+                      <>
+                        <div className="mb-5 flex items-center justify-between gap-3 rounded-[24px] border border-amber-100 bg-gradient-to-r from-amber-50 to-white px-4 py-3">
+                          <button
+                            type="button"
+                            className="inline-flex h-10 w-10 items-center justify-center rounded-full bg-white text-ink shadow-sm transition hover:bg-slate-100"
+                            onClick={() =>
+                              setDueMonthCarouselIndex((current) =>
+                                current === 0 ? summaryInsights.dueByCycleMonthCards.length - 1 : current - 1
+                              )
+                            }
+                            aria-label="Previous due month"
+                          >
+                            <CarouselArrowIcon direction="left" />
+                          </button>
+                          <div className="text-center">
+                            <p className="text-xs font-bold uppercase tracking-[0.22em] text-slate-500">Due Calendar</p>
+                            <h4 className="text-lg font-semibold text-ink">
+                              {summaryInsights.dueByCycleMonthCards[dueMonthCarouselIndex]?.monthLabel}
+                            </h4>
+                          </div>
+                          <button
+                            type="button"
+                            className="inline-flex h-10 w-10 items-center justify-center rounded-full bg-white text-ink shadow-sm transition hover:bg-slate-100"
+                            onClick={() =>
+                              setDueMonthCarouselIndex((current) =>
+                                current === summaryInsights.dueByCycleMonthCards.length - 1 ? 0 : current + 1
+                              )
+                            }
+                            aria-label="Next due month"
+                          >
+                            <CarouselArrowIcon direction="right" />
+                          </button>
+                        </div>
+
+                        <div className="grid gap-4 md:grid-cols-2">
+                          {[
+                            {
+                              title: "1st to 15th due board",
+                              items: summaryInsights.dueByCycleMonthCards[dueMonthCarouselIndex]?.fifteenth || [],
+                              total: summaryInsights.dueByCycleMonthCards[dueMonthCarouselIndex]?.fifteenthTotal || 0,
+                              tone: "border-sky-100 bg-sky-50/70",
+                            },
+                            {
+                              title: "16th to month-end due board",
+                              items: summaryInsights.dueByCycleMonthCards[dueMonthCarouselIndex]?.thirtieth || [],
+                              total: summaryInsights.dueByCycleMonthCards[dueMonthCarouselIndex]?.thirtiethTotal || 0,
+                              tone: "border-amber-100 bg-amber-50/70",
+                            },
+                          ].map((cycleCard) => (
+                            <div key={cycleCard.title} className={`rounded-[24px] border p-4 ${cycleCard.tone}`}>
+                              <div className="mb-4 border-b border-white/80 pb-3">
+                                <p className="text-sm text-slate-500">{cycleCard.title}</p>
+                                <strong className="mt-1 block text-xl font-semibold text-ink">{formatCurrency(cycleCard.total)}</strong>
+                              </div>
+                              {cycleCard.items.length === 0 ? (
+                                <p className="text-sm text-slate-500">No scheduled dues in this billing window for the selected month.</p>
+                              ) : (
+                                <div className="grid gap-3 sm:grid-cols-2">
+                                  {cycleCard.items.map((item) => (
+                                    <div key={`${item.loanId}-${item.dueDate}`} className="rounded-2xl border border-white/80 bg-white/90 p-3 shadow-sm">
+                                      <p className="font-semibold text-ink">{item.loanName}</p>
+                                      <p className="text-sm text-slate-500">Due {formatDate(item.dueDate)}</p>
+                                      <strong className="mt-1 block text-base font-semibold text-slateblue">{formatCurrency(item.monthlyPayment)}</strong>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      </>
+                    )}
+                  </SummarySection>
+                </>
+              ) : null}
+
+              {loanTypeFilter !== "flexible" ? (
+                <SummarySection
+                  title="Rest Of Year Payment Forecast"
+                  description="This section projects the remaining scheduled payments for the rest of the year based on the current due date, payment frequency, and remaining loan term."
+                >
+                  <div className="mb-5 rounded-[24px] border border-emerald-100 bg-gradient-to-r from-emerald-50 to-white p-4">
+                    <p className="text-sm text-slate-500">Total scheduled for the rest of the year</p>
+                    <strong className="mt-1 block text-2xl font-semibold text-ink">{formatCurrency(summaryInsights.restOfYearTotal)}</strong>
+                  </div>
+                  {summaryInsights.restOfYearByLoan.length === 0 ? (
+                    <p className="text-sm text-slate-500">No remaining fixed-loan payments scheduled for the rest of this year.</p>
+                  ) : (
+                    <div className="grid gap-3">
+                      {summaryInsights.restOfYearByLoan.map((loan) => (
+                        <div key={loan.id} className="rounded-[24px] border border-emerald-100 bg-emerald-50/70 p-4">
+                          <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+                            <div>
+                              <p className="font-semibold text-ink">{loan.loanName}</p>
+                              <p className="text-sm text-slate-500">
+                                Monthly payment {formatCurrency(loan.monthlyPayment)} | Next due {formatDate(loan.scheduledPayments[0]?.dueDate)}
+                              </p>
+                            </div>
+                            <div className="text-left md:text-right">
+                              <p className="text-sm text-slate-500">Remaining this year</p>
+                              <strong className="text-lg font-semibold text-emerald-700">{formatCurrency(loan.remainingYearTotal)}</strong>
                             </div>
                           </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
+                          <div className="mt-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+                            {loan.scheduledPayments.map((item) => (
+                              <div key={`${loan.id}-${item.dueDate}`} className="rounded-2xl border border-white/80 bg-white/90 px-4 py-3">
+                                <p className="text-sm font-semibold text-ink">{formatDate(item.dueDate)}</p>
+                                <p className="text-sm text-slate-500">{item.monthLabel}</p>
+                                <strong className="mt-1 block text-base font-semibold text-slateblue">{formatCurrency(item.monthlyPayment)}</strong>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </SummarySection>
               ) : null}
 
               <SummarySection title="Visual Snapshot" description="A quick visual read on portfolio mix and overall progress for the loans currently displayed.">
                 <div className="grid gap-5 lg:grid-cols-[1.2fr_0.8fr]">
-                  <div className="rounded-[24px] border border-sky-100 bg-sky-50/80 p-5">
+                  <div className="rounded-[24px] border border-sky-100 bg-gradient-to-br from-sky-50 to-white p-5">
                     <div className="mb-4 flex items-center justify-between gap-3">
                       <h4 className="text-base font-semibold text-ink">Completion by loan</h4>
                       <span className="text-sm text-slate-500">Based on paid vs total payable</span>
@@ -1193,7 +1409,7 @@ export default function App() {
                     </div>
                   </div>
 
-                  <div className="rounded-[24px] border border-amber-100 bg-amber-50/70 p-5">
+                  <div className="rounded-[24px] border border-amber-100 bg-gradient-to-br from-amber-50 to-white p-5">
                     <h4 className="text-base font-semibold text-ink">Loan type mix</h4>
                     <p className="mt-1 text-sm text-slate-500">A simple split between fixed and flexible loans.</p>
                     <div className="mt-5 grid gap-4">
@@ -1273,7 +1489,7 @@ export default function App() {
                     <p className="text-sm text-slate-500">No recorded payments yet under the current filter.</p>
                   ) : (
                     summaryInsights.paymentActivity.map((loan) => (
-                      <div key={loan.id} className="rounded-[24px] border border-sky-100 bg-sky-50/80 p-4">
+                      <div key={loan.id} className="rounded-[24px] border border-sky-100 bg-gradient-to-r from-sky-50 to-white p-4">
                         <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
                           <div>
                             <p className="font-semibold text-ink">{loan.loanName}</p>

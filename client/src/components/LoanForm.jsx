@@ -41,6 +41,18 @@ const fieldClassName =
 const labelClassName = "grid min-w-0 gap-2 text-sm font-semibold text-slate-700";
 const sectionClassName = "rounded-3xl border border-white/70 bg-white/90 p-4 shadow-glass backdrop-blur sm:rounded-[28px] sm:p-6";
 
+function LoadingState({ title, description }) {
+  return (
+    <div className="grid min-h-[320px] place-items-center rounded-[24px] border border-slate-200 bg-slate-50/80 px-6 py-10 text-center">
+      <div>
+        <div className="mx-auto h-12 w-12 animate-spin rounded-full border-4 border-slate-200 border-t-slateblue" />
+        <h3 className="mt-4 text-lg font-semibold text-ink">{title}</h3>
+        <p className="mt-2 text-sm text-slate-500">{description}</p>
+      </div>
+    </div>
+  );
+}
+
 function roundToTwo(value) {
   return Math.round((Number(value) + Number.EPSILON) * 100) / 100;
 }
@@ -103,7 +115,15 @@ export default function LoanForm({
           <h2 className="text-xl font-semibold text-ink sm:text-2xl">{title}</h2>
         </div>
       </div>
-      <form className="mt-4 grid grid-cols-2 gap-3 sm:mt-5 sm:gap-4" onSubmit={handleSubmit}>
+      {isSubmitting ? (
+        <div className="mt-4 sm:mt-5">
+          <LoadingState
+            title={initialValues ? "Updating loan information" : "Saving loan information"}
+            description="Please wait while the app updates the loan details and refreshes the schedule."
+          />
+        </div>
+      ) : (
+      <form className="mt-4 grid grid-cols-1 gap-3 min-[430px]:grid-cols-2 sm:mt-5 sm:gap-4" onSubmit={handleSubmit}>
         <label className={labelClassName}>
           Container
           <select className={fieldClassName} name="containerId" value={formData.containerId} onChange={handleChange} required>
@@ -220,6 +240,7 @@ export default function LoanForm({
           ) : null}
         </div>
       </form>
+      )}
     </section>
   );
 }

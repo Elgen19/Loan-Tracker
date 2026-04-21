@@ -21,6 +21,18 @@ function RemoveIcon() {
   );
 }
 
+function LoadingState({ title, description }) {
+  return (
+    <div className="grid min-h-[260px] place-items-center rounded-[24px] border border-slate-200 bg-slate-50/80 px-6 py-10 text-center">
+      <div>
+        <div className="mx-auto h-12 w-12 animate-spin rounded-full border-4 border-slate-200 border-t-slateblue" />
+        <h3 className="mt-4 text-lg font-semibold text-ink">{title}</h3>
+        <p className="mt-2 text-sm text-slate-500">{description}</p>
+      </div>
+    </div>
+  );
+}
+
 function buildInitialFormState(initialValues) {
   return {
     amount: initialValues?.amount ?? "",
@@ -189,6 +201,12 @@ export default function PaymentForm({
   }
 
   return (
+    isSubmitting || isDeleting ? (
+      <LoadingState
+        title={isDeleting ? "Removing payment" : initialValues ? "Updating payment" : "Saving payment"}
+        description="Please wait while the payment record and proof details are being updated."
+      />
+    ) : (
     <form className="grid gap-4" onSubmit={handleSubmit}>
       <div className="grid gap-3">
         <div className="grid grid-cols-2 gap-3">
@@ -269,5 +287,6 @@ export default function PaymentForm({
         </button>
       </div>
     </form>
+    )
   );
 }
