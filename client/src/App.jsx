@@ -18,7 +18,7 @@ import {
   updatePayment as updatePaymentEntry,
 } from "./api";
 import { auth } from "./firebase";
-import { formatCurrency, formatDate } from "./utils";
+import { formatCurrency, formatDate, calculateActualMonthlyDue } from "./utils";
 
 function normalizeDate(value) {
   if (!value) {
@@ -320,8 +320,8 @@ export default function App() {
   const [expandedLoanId, setExpandedLoanId] = React.useState("");
   const [selectedContainerView, setSelectedContainerView] = React.useState("loans");
   const [searchTerm, setSearchTerm] = React.useState("");
-  const [statusFilter, setStatusFilter] = React.useState("all");
-  const [loanTypeFilter, setLoanTypeFilter] = React.useState("all");
+  const [statusFilter, setStatusFilter] = React.useState("active");
+  const [loanTypeFilter, setLoanTypeFilter] = React.useState("fixed");
   const [dueWindowDays, setDueWindowDays] = React.useState(7);
   const [dueMonthCarouselIndex, setDueMonthCarouselIndex] = React.useState(0);
   const [error, setError] = React.useState("");
@@ -387,8 +387,8 @@ export default function App() {
       setSelectedContainerView(nextState.selectedContainerView || "loans");
       setExpandedLoanId("");
       setSearchTerm("");
-      setStatusFilter("all");
-      setLoanTypeFilter("all");
+      setStatusFilter("active");
+      setLoanTypeFilter("fixed");
       setDueWindowDays(7);
     };
 
@@ -428,7 +428,18 @@ export default function App() {
 
     return searchableLoans.filter((loan) => {
       const matchesStatus = statusFilter === "all" ? true : loan.status === statusFilter;
-      const matchesLoanType = loanTypeFilter === "all" ? true : loan.loanType === loanTypeFilter;
+      
+      let matchesLoanType = true;
+      if (loanTypeFilter === "fixed") {
+        matchesLoanType = loan.loanType === "fixed";
+      } else if (loanTypeFilter === "flexible") {
+        matchesLoanType = loan.loanType === "flexible";
+      } else if (loanTypeFilter === "flexible-self") {
+        matchesLoanType = loan.loanType === "flexible" && loan.fundingSource !== "linked";
+      } else if (loanTypeFilter === "flexible-linked") {
+        matchesLoanType = loan.loanType === "flexible" && loan.fundingSource === "linked";
+      }
+
       const normalizedSearch = searchTerm.trim().toLowerCase();
       const matchesSearch =
         normalizedSearch.length === 0
@@ -450,8 +461,24 @@ export default function App() {
         summary.totalAmountPayable += totalPayable;
         summary.totalAmountPaid += paid;
         summary.totalRemainingBalance += remaining;
-        summary.monthlyCashRequirement += Number(loan.monthlyPayment || 0);
+        summary.monthlyCashRequirement += calculateActualMonthlyDue(loan.monthlyPayment, loan.paymentFrequency);
         summary.totalPrincipalAmount += principal;
+
+        if (loan.loanType === "fixed") {
+          summary.fixedRemainingBalance += remaining;
+          summary.hasFixedLoans = true;
+        } else if (loan.loanType === "flexible") {
+          summary.flexibleRemainingBalance += remaining;
+          summary.hasFlexibleLoans = true;
+          const linkedLoanIds = loan.linkedLoanIds || (loan.linkedLoanId ? [loan.linkedLoanId] : []);
+          if (loan.fundingSource === "linked" && linkedLoanIds.length > 0) {
+            summary.linkedFlexibleRemainingBalance += remaining;
+            summary.hasLinkedFlexibleLoans = true;
+          } else {
+            summary.selfFlexibleRemainingBalance += remaining;
+            summary.hasSelfFlexibleLoans = true;
+          }
+        }
 
         return summary;
       },
@@ -461,6 +488,14 @@ export default function App() {
         totalRemainingBalance: 0,
         monthlyCashRequirement: 0,
         totalPrincipalAmount: 0,
+        fixedRemainingBalance: 0,
+        flexibleRemainingBalance: 0,
+        linkedFlexibleRemainingBalance: 0,
+        selfFlexibleRemainingBalance: 0,
+        hasFixedLoans: false,
+        hasFlexibleLoans: false,
+        hasLinkedFlexibleLoans: false,
+        hasSelfFlexibleLoans: false,
       }
     );
   }, [filteredLoans]);
@@ -916,8 +951,8 @@ export default function App() {
     setSelectedContainerView("loans");
     setExpandedLoanId("");
     setSearchTerm("");
-    setStatusFilter("all");
-    setLoanTypeFilter("all");
+    setStatusFilter("active");
+    setLoanTypeFilter("fixed");
     setDueWindowDays(7);
   }
 
@@ -926,8 +961,8 @@ export default function App() {
     setSelectedContainerView("loans");
     setExpandedLoanId("");
     setSearchTerm("");
-    setStatusFilter("all");
-    setLoanTypeFilter("all");
+    setStatusFilter("active");
+    setLoanTypeFilter("fixed");
     setDueWindowDays(7);
   }
 
@@ -952,7 +987,7 @@ export default function App() {
   }
 
   return (
-    <main className="mx-auto min-h-screen w-full max-w-7xl px-3 py-4 sm:px-6 sm:py-8 lg:px-8">
+    <main className="mx-auto min-h-screen w-full max-w-5xl px-3 py-4 sm:px-6 sm:py-8 lg:px-8">
       <div className="mb-4 flex items-center justify-between gap-3 rounded-3xl border border-white/70 bg-white/80 px-4 py-3 text-sm shadow-glass backdrop-blur">
         <div className="min-w-0">
           <p className="font-semibold text-ink">Signed in</p>
@@ -1105,7 +1140,9 @@ export default function App() {
                     >
                       <option value="all">All types</option>
                       <option value="fixed">Fixed</option>
-                      <option value="flexible">Flexible</option>
+                      <option value="flexible">Flexible (All)</option>
+                      <option value="flexible-self">Flexible (Self-funded)</option>
+                      <option value="flexible-linked">Flexible (Borrowed)</option>
                     </select>
                   </label>
                 </div>
@@ -1132,7 +1169,9 @@ export default function App() {
                   >
                     <option value="all">All types</option>
                     <option value="fixed">Fixed</option>
-                    <option value="flexible">Flexible</option>
+                    <option value="flexible">Flexible (All)</option>
+                    <option value="flexible-self">Flexible (Self-funded)</option>
+                    <option value="flexible-linked">Flexible (Borrowed)</option>
                   </select>
                 </label>
               </div>
@@ -1150,20 +1189,25 @@ export default function App() {
 
           {!isLoading && selectedContainerView === "loans" ? (
             <div className="grid gap-4">
-              {filteredLoans.map((loan) => (
-                <LoanCard
-                  key={loan.id}
-                  loan={loan}
-                  onOpenPaymentModal={handleOpenPaymentModal}
-                  onEditPayment={handleOpenPaymentEditor}
-                  onViewPaymentProofs={handleOpenPaymentProofViewer}
-                  onEdit={handleOpenEditLoanModal}
-                  onDelete={handleRequestDeleteLoan}
-                  isDeleting={deletingLoanId === loan.id}
-                  isExpanded={expandedLoanId === loan.id}
-                  onToggle={() => handleToggleLoan(loan.id)}
-                />
-              ))}
+              {filteredLoans.map((loan) => {
+                const linkedLoanIds = loan.linkedLoanIds || (loan.linkedLoanId ? [loan.linkedLoanId] : []);
+                const linkedLoans = loans.filter((l) => linkedLoanIds.includes(l.id));
+                return (
+                  <LoanCard
+                    key={loan.id}
+                    loan={loan}
+                    linkedLoans={linkedLoans}
+                    onOpenPaymentModal={handleOpenPaymentModal}
+                    onEditPayment={handleOpenPaymentEditor}
+                    onViewPaymentProofs={handleOpenPaymentProofViewer}
+                    onEdit={handleOpenEditLoanModal}
+                    onDelete={handleRequestDeleteLoan}
+                    isDeleting={deletingLoanId === loan.id}
+                    isExpanded={expandedLoanId === loan.id}
+                    onToggle={() => handleToggleLoan(loan.id)}
+                  />
+                );
+              })}
             </div>
           ) : null}
 
@@ -1179,7 +1223,61 @@ export default function App() {
                 </div>
               </SummarySection>
 
-              {loanTypeFilter !== "flexible" ? (
+              {summaryCards.hasFixedLoans && summaryCards.hasFlexibleLoans ? (
+                <SummarySection
+                  title="Liability Reconciliation"
+                  description="Reconcile your fixed outgoing obligations against flexible incoming receivables to monitor coverages."
+                >
+                  <div className="grid gap-4 sm:grid-cols-3">
+                    <div className="rounded-[24px] border border-rose-100 bg-rose-50/50 p-5 shadow-sm">
+                      <p className="text-sm font-semibold text-rose-700">Fixed Obligations (What you owe)</p>
+                      <strong className="mt-2 block text-2xl font-bold text-rose-900">
+                        {formatCurrency(summaryCards.fixedRemainingBalance)}
+                      </strong>
+                      <p className="mt-1 text-xs text-rose-500">Under fixed payment schedules to apps</p>
+                    </div>
+
+                    <div className="rounded-[24px] border border-emerald-100 bg-emerald-50/50 p-5 shadow-sm">
+                      <p className="text-sm font-semibold text-emerald-700">Flexible Receivables (What you are owed)</p>
+                      <strong className="mt-2 block text-2xl font-bold text-emerald-900">
+                        {formatCurrency(summaryCards.flexibleRemainingBalance)}
+                      </strong>
+                      <div className="mt-1 flex flex-col gap-0.5 text-xs text-emerald-600">
+                        <span>• Linked: {formatCurrency(summaryCards.linkedFlexibleRemainingBalance)}</span>
+                        <span>• Self-funded: {formatCurrency(summaryCards.selfFlexibleRemainingBalance)}</span>
+                      </div>
+                    </div>
+
+                    <div
+                      className={`rounded-[24px] border p-5 shadow-sm ${
+                        summaryCards.linkedFlexibleRemainingBalance >= summaryCards.fixedRemainingBalance
+                          ? "border-sky-100 bg-sky-50/50"
+                          : "border-amber-100 bg-amber-50/50"
+                      }`}
+                    >
+                      <p className="text-sm font-semibold text-slate-700">Linked Coverage Difference</p>
+                      <strong
+                        className={`mt-2 block text-2xl font-bold ${
+                          summaryCards.linkedFlexibleRemainingBalance >= summaryCards.fixedRemainingBalance
+                            ? "text-sky-950"
+                            : "text-amber-950"
+                        }`}
+                      >
+                        {formatCurrency(
+                          summaryCards.linkedFlexibleRemainingBalance - summaryCards.fixedRemainingBalance
+                        )}
+                      </strong>
+                      <p className="mt-1 text-xs text-slate-500 font-medium">
+                        {summaryCards.linkedFlexibleRemainingBalance >= summaryCards.fixedRemainingBalance
+                          ? "Surplus: Borrowed funds are fully covered by borrower"
+                          : "Shortfall: Outgoing obligations exceed borrower payments"}
+                      </p>
+                    </div>
+                  </div>
+                </SummarySection>
+              ) : null}
+
+              {!loanTypeFilter.startsWith("flexible") ? (
                 <SummarySection
                   title={`Due In The Next ${dueWindowDays} Day${dueWindowDays === 1 ? "" : "s"}`}
                   description="Use the selector to focus on the most urgent dues first, whether they are due tomorrow, within 3 days, or within the week."
@@ -1226,7 +1324,7 @@ export default function App() {
                 </SummarySection>
               ) : null}
 
-              {loanTypeFilter !== "flexible" ? (
+              {!loanTypeFilter.startsWith("flexible") ? (
                 <>
                   <SummarySection title="Due This Month" description="This section totals loans whose current due date falls within the current month.">
                     <div className="mb-5 rounded-[24px] border border-sky-100 bg-gradient-to-r from-sky-50 to-white p-4">
@@ -1337,7 +1435,7 @@ export default function App() {
                 </>
               ) : null}
 
-              {loanTypeFilter !== "flexible" ? (
+              {!loanTypeFilter.startsWith("flexible") ? (
                 <SummarySection
                   title="Rest Of Year Payment Forecast"
                   description="This section projects the remaining scheduled payments for the rest of the year based on the current due date, payment frequency, and remaining loan term."
@@ -1520,25 +1618,27 @@ export default function App() {
                 </div>
               </SummarySection>
 
-              {loanTypeFilter !== "flexible" ? (
+              {!loanTypeFilter.startsWith("flexible") ? (
                 <>
                   <SummarySection title="Interest Exposure" description="A comparison of how much interest each visible loan is carrying.">
                     <div className="grid gap-3">
-                      {filteredLoans.length === 0 ? (
+                      {filteredLoans.filter((loan) => loan.loanType === "fixed" && loan.interestCost > 0).length === 0 ? (
                         <p className="text-sm text-slate-500">No loan interest data to show.</p>
                       ) : (
                         <div className="grid grid-cols-2 gap-3">
-                          {filteredLoans.map((loan) => (
-                            <div key={loan.id} className="rounded-[24px] border border-amber-100 bg-amber-50/70 p-4">
-                              <div className="grid gap-2">
-                                <div>
-                                  <p className="font-semibold text-ink">{loan.loanName}</p>
-                                  <p className="text-sm text-slate-500">{loan.loanType === "fixed" ? loan.termLabel : "Flexible agreement"}</p>
+                          {filteredLoans
+                            .filter((loan) => loan.loanType === "fixed" && loan.interestCost > 0)
+                            .map((loan) => (
+                              <div key={loan.id} className="rounded-[24px] border border-amber-100 bg-amber-50/70 p-4">
+                                <div className="grid gap-2">
+                                  <div>
+                                    <p className="font-semibold text-ink">{loan.loanName}</p>
+                                    <p className="text-sm text-slate-500">{loan.termLabel}</p>
+                                  </div>
+                                  <strong className="text-base font-semibold text-slateblue">{formatCurrency(loan.interestCost)}</strong>
                                 </div>
-                                <strong className="text-base font-semibold text-slateblue">{formatCurrency(loan.interestCost)}</strong>
                               </div>
-                            </div>
-                          ))}
+                            ))}
                         </div>
                       )}
                     </div>
@@ -1671,6 +1771,7 @@ export default function App() {
               isSubmitting={isSavingLoan}
               initialValues={loanFormInitialValues}
               containers={containers}
+              loans={loans}
               submitLabel={editingLoan ? "Save changes" : "Add loan"}
               title={editingLoan ? "Edit loan details" : "Add loan details"}
               eyebrow={editingLoan ? "Editing Loan" : "New Loan"}

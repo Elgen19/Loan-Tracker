@@ -50,9 +50,26 @@ export default function LoanCard({
   isDeleting,
   isExpanded,
   onToggle,
+  linkedLoans = [],
 }) {
   const paidAmount = Number(loan.totalPayable) - Number(loan.remainingBalance);
   const progress = loan.totalPayable > 0 ? Math.min((paidAmount / loan.totalPayable) * 100, 100) : 0;
+
+  // Waterfall payment allocation to linked fixed loans
+  let remainingPaid = paidAmount;
+  const allocation = linkedLoans.map((fixedLoan) => {
+    const principalVal = Number(fixedLoan.principal || 0);
+    const allocated = Math.min(remainingPaid, principalVal);
+    remainingPaid = Math.max(remainingPaid - allocated, 0);
+    const coversPercent = principalVal > 0 ? (allocated / principalVal) * 100 : 0;
+    
+    return {
+      ...fixedLoan,
+      allocated,
+      coversPercent,
+      isFullyCovered: allocated >= principalVal,
+    };
+  });
 
   return (
     <article
@@ -90,6 +107,20 @@ export default function LoanCard({
                 >
                   {getStatusLabel(loan.status)}
                 </span>
+                {loan.loanType === "flexible" ? (
+                  loan.fundingSource === "linked" && linkedLoans.length > 0 ? (
+                    <span className="inline-flex items-center gap-1 rounded-full border border-sky-100 bg-sky-50 px-3 py-2 text-xs font-semibold text-sky-700">
+                      <svg viewBox="0 0 24 24" className="h-3.5 w-3.5 fill-current">
+                        <path d="M3.9 12c0-1.71 1.39-3.1 3.1-3.1h4V7H7c-2.76 0-5 2.24-5 5s2.24 5 5 5h4v-1.9H7c-1.71 0-3.1-1.39-3.1-3.1zM8 13h8v-2H8v2zm9-6h-4v1.9h4c1.71 0 3.1 1.39 3.1 3.1s-1.39 3.1-3.1 3.1h-4V17h4c2.76 0 5-2.24 5-5s-2.24-5-5-5z"/>
+                      </svg>
+                      Linked: {linkedLoans.map(l => l.loanName).join(", ")}
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-500">
+                      Self-funded
+                    </span>
+                  )
+                ) : null}
               </div>
             </div>
             <div className="flex shrink-0 items-start gap-2">
@@ -126,22 +157,39 @@ export default function LoanCard({
           </div>
         </div>
 
-        <div className="mt-4 grid grid-cols-2 gap-3 sm:mt-5 sm:gap-4 lg:grid-cols-3">
-          <div>
-            <span className="text-sm text-slate-500">Remaining balance</span>
-            <strong className="mt-1 block text-base font-semibold text-ink sm:text-lg">{formatCurrency(loan.remainingBalance)}</strong>
+        {loan.loanType === "fixed" ? (
+          <div className="mt-4 grid grid-cols-2 gap-3 sm:mt-5 sm:gap-4 lg:grid-cols-3">
+            <div>
+              <span className="text-sm text-slate-500">Remaining balance</span>
+              <strong className="mt-1 block text-base font-semibold text-ink sm:text-lg">{formatCurrency(loan.remainingBalance)}</strong>
+            </div>
+            <div>
+              <span className="text-sm text-slate-500">Monthly payment</span>
+              <strong className="mt-1 block text-base font-semibold text-ink sm:text-lg">{formatCurrency(loan.monthlyPayment)}</strong>
+            </div>
+            <div>
+              <span className="text-sm text-slate-500">Next billing date</span>
+              <strong className="mt-1 block text-base font-semibold text-ink sm:text-lg">
+                {formatDate(loan.nextDueDate)}
+              </strong>
+            </div>
           </div>
-          <div>
-            <span className="text-sm text-slate-500">Monthly payment</span>
-            <strong className="mt-1 block text-base font-semibold text-ink sm:text-lg">{formatCurrency(loan.monthlyPayment)}</strong>
+        ) : (
+          <div className="mt-4 grid grid-cols-2 gap-3 sm:mt-5 sm:gap-4 lg:grid-cols-3">
+            <div>
+              <span className="text-sm text-slate-500">Remaining balance</span>
+              <strong className="mt-1 block text-base font-semibold text-ink sm:text-lg">{formatCurrency(loan.remainingBalance)}</strong>
+            </div>
+            <div>
+              <span className="text-sm text-slate-500">Loaned amount</span>
+              <strong className="mt-1 block text-base font-semibold text-ink sm:text-lg">{formatCurrency(loan.principal)}</strong>
+            </div>
+            <div>
+              <span className="text-sm text-slate-500">Paid so far</span>
+              <strong className="mt-1 block text-base font-semibold text-ink sm:text-lg">{formatCurrency(paidAmount)}</strong>
+            </div>
           </div>
-          <div>
-            <span className="text-sm text-slate-500">Next billing date</span>
-            <strong className="mt-1 block text-base font-semibold text-ink sm:text-lg">
-              {loan.loanType === "fixed" ? formatDate(loan.nextDueDate) : "Not applicable"}
-            </strong>
-          </div>
-        </div>
+        )}
 
         <div className="mt-4 grid gap-2 sm:mt-5">
           <div className="flex items-center justify-between gap-3">
@@ -156,46 +204,114 @@ export default function LoanCard({
 
       {isExpanded ? (
         <>
-          <div className="mt-4 grid grid-cols-2 gap-3 sm:mt-5 sm:gap-4 lg:grid-cols-4">
-            <div>
-              <span className="text-sm text-slate-500">Principal</span>
-              <strong className="mt-1 block text-base font-semibold text-ink sm:text-lg">{formatCurrency(loan.principal)}</strong>
-            </div>
-            <div>
-              <span className="text-sm text-slate-500">Monthly payment</span>
-              <strong className="mt-1 block text-base font-semibold text-ink sm:text-lg">{formatCurrency(loan.monthlyPayment)}</strong>
-            </div>
-            <div>
-              <span className="text-sm text-slate-500">Interest cost</span>
-              <strong className="mt-1 block text-base font-semibold text-ink sm:text-lg">{formatCurrency(loan.interestCost)}</strong>
-            </div>
-            <div>
-              <span className="text-sm text-slate-500">Total payable</span>
-              <strong className="mt-1 block text-base font-semibold text-ink sm:text-lg">{formatCurrency(loan.totalPayable)}</strong>
-            </div>
-          </div>
+          {loan.loanType === "fixed" ? (
+            <>
+              <div className="mt-4 grid grid-cols-2 gap-3 sm:mt-5 sm:gap-4 lg:grid-cols-4">
+                <div>
+                  <span className="text-sm text-slate-500">Principal</span>
+                  <strong className="mt-1 block text-base font-semibold text-ink sm:text-lg">{formatCurrency(loan.principal)}</strong>
+                </div>
+                <div>
+                  <span className="text-sm text-slate-500">Monthly payment</span>
+                  <strong className="mt-1 block text-base font-semibold text-ink sm:text-lg">{formatCurrency(loan.monthlyPayment)}</strong>
+                </div>
+                <div>
+                  <span className="text-sm text-slate-500">Interest cost</span>
+                  <strong className="mt-1 block text-base font-semibold text-ink sm:text-lg">{formatCurrency(loan.interestCost)}</strong>
+                </div>
+                <div>
+                  <span className="text-sm text-slate-500">Total payable</span>
+                  <strong className="mt-1 block text-base font-semibold text-ink sm:text-lg">{formatCurrency(loan.totalPayable)}</strong>
+                </div>
+              </div>
 
-          <div className="mt-3 grid grid-cols-2 gap-3 sm:mt-4 sm:gap-4">
-            <div>
-              <span className="text-sm text-slate-500">Paid so far</span>
-              <strong className="mt-1 block text-base font-semibold text-ink sm:text-lg">{formatCurrency(paidAmount)}</strong>
-            </div>
-          </div>
+              <div className="mt-3 grid grid-cols-2 gap-3 sm:mt-4 sm:gap-4">
+                <div>
+                  <span className="text-sm text-slate-500">Paid so far</span>
+                  <strong className="mt-1 block text-base font-semibold text-ink sm:text-lg">{formatCurrency(paidAmount)}</strong>
+                </div>
+              </div>
 
-          <div className="mt-3 grid grid-cols-3 gap-3 sm:mt-4 sm:gap-4">
-            <div>
-              <span className="text-sm text-slate-500">Term</span>
-              <strong className="mt-1 block text-base font-semibold text-ink sm:text-lg">{loan.loanType === "fixed" ? loan.termLabel : "Not applicable"}</strong>
-            </div>
-            <div>
-              <span className="text-sm text-slate-500">First repayment date</span>
-              <strong className="mt-1 block text-base font-semibold text-ink sm:text-lg">{loan.loanType === "fixed" ? formatDate(loan.firstRepaymentDate) : "Not applicable"}</strong>
-            </div>
-            <div>
-              <span className="text-sm text-slate-500">Next due date</span>
-              <strong className="mt-1 block text-base font-semibold text-ink sm:text-lg">{loan.loanType === "fixed" ? formatDate(loan.nextDueDate) : "Not applicable"}</strong>
-            </div>
-          </div>
+              <div className="mt-3 grid grid-cols-3 gap-3 sm:mt-4 sm:gap-4">
+                <div>
+                  <span className="text-sm text-slate-500">Term</span>
+                  <strong className="mt-1 block text-base font-semibold text-ink sm:text-lg">{loan.termLabel}</strong>
+                </div>
+                <div>
+                  <span className="text-sm text-slate-500">First repayment date</span>
+                  <strong className="mt-1 block text-base font-semibold text-ink sm:text-lg">{formatDate(loan.firstRepaymentDate)}</strong>
+                </div>
+                <div>
+                  <span className="text-sm text-slate-500">Next due date</span>
+                  <strong className="mt-1 block text-base font-semibold text-ink sm:text-lg">{formatDate(loan.nextDueDate)}</strong>
+                </div>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="mt-4 grid grid-cols-2 gap-3 sm:mt-5 sm:gap-4 lg:grid-cols-3">
+                <div>
+                  <span className="text-sm text-slate-500">Principal (Loaned amount)</span>
+                  <strong className="mt-1 block text-base font-semibold text-ink sm:text-lg">{formatCurrency(loan.principal)}</strong>
+                </div>
+                <div>
+                  <span className="text-sm text-slate-500">Total paid so far</span>
+                  <strong className="mt-1 block text-base font-semibold text-ink sm:text-lg">{formatCurrency(paidAmount)}</strong>
+                </div>
+                <div>
+                  <span className="text-sm text-slate-500">Remaining balance</span>
+                  <strong className="mt-1 block text-base font-semibold text-ink sm:text-lg">{formatCurrency(loan.remainingBalance)}</strong>
+                </div>
+              </div>
+
+              {linkedLoans.length > 0 ? (
+                <div className="mt-4 rounded-3xl border border-sky-100 bg-sky-50/20 p-4 sm:mt-5">
+                  <h4 className="text-sm font-semibold text-ink">Linked Fixed Loans Coverage</h4>
+                  <p className="mb-3 text-xs text-slate-500">Waterfall allocation of borrower's total paid ({formatCurrency(paidAmount)})</p>
+                  <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
+                    {allocation.map((item) => (
+                      <div key={item.id} className="flex flex-col justify-between gap-3.5 rounded-2xl border border-white bg-white p-4 shadow-sm transition hover:shadow-md">
+                        <div>
+                          <div className="flex items-center justify-between gap-2">
+                            <p className="truncate text-sm font-semibold text-ink">{item.loanName}</p>
+                            {item.status === "paid" && (
+                              <span className="inline-flex items-center rounded-full bg-blue-50 px-1.5 py-0.5 text-[9px] font-bold text-blue-700 uppercase tracking-wider">
+                                Paid
+                              </span>
+                            )}
+                            {item.status === "overdue" && (
+                              <span className="inline-flex items-center rounded-full bg-rose-50 px-1.5 py-0.5 text-[9px] font-bold text-rose-700 uppercase tracking-wider">
+                                Overdue
+                              </span>
+                            )}
+                          </div>
+                          <div className="mt-1.5 space-y-0.5 text-[11px] text-slate-500 leading-tight">
+                            <p>Principal: <strong>{formatCurrency(item.principal)}</strong></p>
+                            <p>Monthly due: <strong>{formatCurrency(item.monthlyPayment)}</strong></p>
+                          </div>
+                        </div>
+                        <div className="border-t border-slate-100 pt-2 flex items-center justify-between gap-2">
+                          <div>
+                            <p className="text-[10px] text-slate-400 font-medium leading-none">Allocated</p>
+                            <p className="mt-1 text-xs font-semibold text-ink leading-none">{formatCurrency(item.allocated)}</p>
+                          </div>
+                          <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider ${
+                            item.isFullyCovered 
+                              ? "bg-emerald-50 text-emerald-700" 
+                              : item.coversPercent > 0 
+                                ? "bg-amber-50 text-amber-700" 
+                                : "bg-slate-50 text-slate-500"
+                          }`}>
+                            {item.isFullyCovered ? "Fully" : `${item.coversPercent.toFixed(0)}%`}
+                          </span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+            </>
+          )}
 
           {loan.notes ? <p className="mt-4 text-sm leading-6 text-slate-600">{loan.notes}</p> : null}
 

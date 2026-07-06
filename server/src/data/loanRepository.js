@@ -129,13 +129,24 @@ function buildUpdatedLoanFromPayments(existingLoan, payments) {
 function normalizeLoanInput(input, workspaceId, createdBy, existingPayments = [], existingCreatedAt = null) {
   const principal = Number(input.principal);
   const loanType = input.loanType;
-  const remainingBalance = loanType === "fixed" ? Number(input.remainingBalance) : Number(input.remainingBalance || principal);
   const monthlyPayment = loanType === "fixed" ? Number(input.monthlyPayment) : 0;
   const termCount = Number(input.termCount || 0);
-  const now = new Date().toISOString();
-  const totalPayable = roundToTwo(loanType === "fixed" ? monthlyPayment * termCount : Number(input.totalPayable || remainingBalance));
+
+  const inputRemaining = loanType === "fixed" ? Number(input.remainingBalance) : Number(input.remainingBalance || principal);
+  const totalPayable = roundToTwo(loanType === "fixed" ? monthlyPayment * termCount : Number(input.totalPayable || inputRemaining));
+
+  let remainingBalance;
+  if (Array.isArray(existingPayments) && existingPayments.length > 0) {
+    const totalPaid = roundToTwo(existingPayments.reduce((sum, p) => sum + Number(p.amount || 0), 0));
+    remainingBalance = roundToTwo(Math.max(totalPayable - totalPaid, 0));
+  } else {
+    remainingBalance = inputRemaining;
+  }
+
+  const nextDueDate = (loanType === "fixed" && remainingBalance > 0) ? (input.nextDueDate || "") : "";
   const termLabel = loanType === "fixed" ? `${termCount} ${input.paymentFrequency}` : "Flexible agreement";
   const interestCost = roundToTwo(Math.max(totalPayable - principal, 0));
+  const now = new Date().toISOString();
 
   return {
     loanName: input.loanName,
@@ -150,14 +161,18 @@ function normalizeLoanInput(input, workspaceId, createdBy, existingPayments = []
     totalPayable,
     interestCost,
     firstRepaymentDate: loanType === "fixed" ? input.firstRepaymentDate : "",
-    nextDueDate: loanType === "fixed" ? input.nextDueDate : "",
+    nextDueDate,
     remainingBalance,
     loanType,
     notes: input.notes || "",
     payments: existingPayments,
     createdAt: existingCreatedAt || now,
     updatedAt: now,
-    status: getLoanStatus(loanType === "fixed" ? input.nextDueDate : "", remainingBalance),
+    status: getLoanStatus(loanType === "fixed" ? nextDueDate : "", remainingBalance),
+    fundingSource: input.fundingSource || "self",
+    linkedLoanIds: Array.isArray(input.linkedLoanIds) ? input.linkedLoanIds : [],
+    linkedLoanId: input.linkedLoanId || "",
+    linkedLoanConfigs: input.linkedLoanConfigs || {},
   };
 }
 
