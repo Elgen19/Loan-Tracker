@@ -631,7 +631,8 @@ export default function App() {
           break;
         }
 
-        if (dueDate.getTime() >= today.getTime()) {
+        const isCurrentDue = installmentIndex === 0;
+        if (dueDate.getTime() >= today.getTime() || isCurrentDue) {
           scheduleItems.push({
             loanId: loan.id,
             loanName: loan.loanName,
@@ -639,6 +640,7 @@ export default function App() {
             dueDate: dueDate.toISOString(),
             dueDay: dueDate.getDate(),
             monthLabel: formatMonthLabel(dueDate),
+            isOverdue: isCurrentDue && dueDate.getTime() < today.getTime(),
           });
         }
 
@@ -661,7 +663,17 @@ export default function App() {
       .filter((loan) => loan.scheduledPayments.length > 0)
       .sort((left, right) => new Date(left.scheduledPayments[0].dueDate).getTime() - new Date(right.scheduledPayments[0].dueDate).getTime());
 
-    const monthCursor = new Date(today.getFullYear(), today.getMonth(), 1);
+    let earliestMonthDate = new Date(today.getFullYear(), today.getMonth(), 1);
+    fixedLoans.forEach((loan) => {
+      if (loan.nextDueDate && Number(loan.remainingBalance || 0) > 0) {
+        const d = normalizeDate(loan.nextDueDate);
+        if (d && d.getFullYear() === today.getFullYear() && d.getTime() < earliestMonthDate.getTime()) {
+          earliestMonthDate = new Date(d.getFullYear(), d.getMonth(), 1);
+        }
+      }
+    });
+
+    const monthCursor = earliestMonthDate;
     const dueByCycleMonthCards = [];
 
     while (monthCursor.getFullYear() === today.getFullYear()) {
@@ -1416,15 +1428,31 @@ export default function App() {
                               {cycleCard.items.length === 0 ? (
                                 <p className="text-sm text-slate-500">No scheduled dues in this billing window for the selected month.</p>
                               ) : (
-                                <div className="grid gap-3 sm:grid-cols-2">
-                                  {cycleCard.items.map((item) => (
-                                    <div key={`${item.loanId}-${item.dueDate}`} className="rounded-2xl border border-white/80 bg-white/90 p-3 shadow-sm">
-                                      <p className="font-semibold text-ink">{item.loanName}</p>
-                                      <p className="text-sm text-slate-500">Due {formatDate(item.dueDate)}</p>
-                                      <strong className="mt-1 block text-base font-semibold text-slateblue">{formatCurrency(item.monthlyPayment)}</strong>
-                                    </div>
-                                  ))}
-                                </div>
+                                  <div className="grid gap-3 sm:grid-cols-2">
+                                    {cycleCard.items.map((item) => (
+                                      <div
+                                        key={`${item.loanId}-${item.dueDate}`}
+                                        className={`rounded-2xl border p-3 shadow-sm ${
+                                          item.isOverdue
+                                            ? "border-rose-200 bg-rose-50/20"
+                                            : "border-white/80 bg-white/90"
+                                        }`}
+                                      >
+                                        <div className="flex items-center justify-between gap-2">
+                                          <p className="font-semibold text-ink">{item.loanName}</p>
+                                          {item.isOverdue && (
+                                            <span className="inline-flex items-center rounded-full bg-rose-50 px-1.5 py-0.5 text-[9px] font-bold text-rose-700 uppercase tracking-wider">
+                                              Overdue
+                                            </span>
+                                          )}
+                                        </div>
+                                        <p className={`text-sm ${item.isOverdue ? "text-rose-600 font-medium" : "text-slate-500"}`}>
+                                          Due {formatDate(item.dueDate)}
+                                        </p>
+                                        <strong className="mt-1 block text-base font-semibold text-slateblue">{formatCurrency(item.monthlyPayment)}</strong>
+                                      </div>
+                                    ))}
+                                  </div>
                               )}
                             </div>
                           ))}
