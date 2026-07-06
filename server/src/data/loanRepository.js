@@ -97,15 +97,24 @@ function buildUpdatedLoanFromPayments(existingLoan, payments) {
   const totalPaid = roundToTwo(orderedPayments.reduce((sum, payment) => sum + Number(payment.amount || 0), 0));
   const remainingBalance = roundToTwo(Math.max(Number(existingLoan.totalPayable || 0) - totalPaid, 0));
   const totalInstallments = getTotalInstallments(existingLoan);
-  const nextTermCount =
-    existingLoan.loanType === "fixed" ? Math.max(totalInstallments - orderedPayments.length, 0) : Number(existingLoan.termCount || 0);
+  
+  const fullyPaidInstallments = existingLoan.loanType === "fixed"
+    ? Math.floor((totalPaid + 0.01) / Number(existingLoan.monthlyPayment || 1))
+    : 0;
 
-  let nextDueDate = existingLoan.loanType === "fixed" ? existingLoan.firstRepaymentDate || existingLoan.nextDueDate || "" : "";
+  const nextTermCount =
+    existingLoan.loanType === "fixed" ? Math.max(totalInstallments - fullyPaidInstallments, 0) : Number(existingLoan.termCount || 0);
+
+  let nextDueDate = existingLoan.loanType === "fixed" 
+    ? existingLoan.firstRepaymentDate || existingLoan.nextDueDate || "" 
+    : "";
 
   if (existingLoan.loanType === "fixed" && nextDueDate && remainingBalance > 0) {
-    for (let index = 0; index < orderedPayments.length; index += 1) {
-      nextDueDate = advanceDueDate(nextDueDate, existingLoan.paymentFrequency);
+    let tempDueDate = existingLoan.firstRepaymentDate || nextDueDate;
+    for (let index = 0; index < fullyPaidInstallments; index += 1) {
+      tempDueDate = advanceDueDate(tempDueDate, existingLoan.paymentFrequency);
     }
+    nextDueDate = tempDueDate;
   }
 
   if (remainingBalance <= 0) {
@@ -406,25 +415,29 @@ export async function recalculateLoanSchedules(userId) {
       return new Date(left.paymentDate).getTime() - new Date(right.paymentDate).getTime();
     });
 
+    const totalPaid = roundToTwo(sortedPayments.reduce((sum, p) => sum + Number(p.amount || 0), 0));
+    const fullyPaidInstallments = Math.floor((totalPaid + 0.01) / Number(loan.monthlyPayment || 1));
+    const totalInstallments = getTotalInstallments(loan);
+    const expectedTermCount = Math.max(totalInstallments - fullyPaidInstallments, 0);
+
     let expectedNextDueDate = loan.firstRepaymentDate;
-
-    for (const payment of sortedPayments) {
-      if (!payment.paymentDate) {
-        continue;
-      }
-
+    for (let index = 0; index < fullyPaidInstallments; index += 1) {
       expectedNextDueDate = advanceDueDate(expectedNextDueDate, loan.paymentFrequency);
     }
 
-    if (Number(loan.remainingBalance) <= 0) {
+    const expectedRemainingBalance = roundToTwo(Math.max(Number(loan.totalPayable || 0) - totalPaid, 0));
+
+    if (expectedRemainingBalance <= 0) {
       expectedNextDueDate = "";
     }
 
-    const expectedStatus = getLoanStatus(expectedNextDueDate, loan.remainingBalance);
+    const expectedStatus = getLoanStatus(expectedNextDueDate, expectedRemainingBalance);
 
     const hasChanges =
       loan.nextDueDate !== expectedNextDueDate ||
-      loan.status !== expectedStatus;
+      loan.status !== expectedStatus ||
+      loan.termCount !== expectedTermCount ||
+      loan.remainingBalance !== expectedRemainingBalance;
 
     if (!hasChanges) {
       continue;
@@ -434,6 +447,9 @@ export async function recalculateLoanSchedules(userId) {
 
     await doc.ref.update({
       nextDueDate: expectedNextDueDate,
+      remainingBalance: expectedRemainingBalance,
+      termCount: expectedTermCount,
+      termLabel: `${expectedTermCount} ${loan.paymentFrequency}`,
       status: expectedStatus,
       updatedAt,
     });
@@ -442,6 +458,8 @@ export async function recalculateLoanSchedules(userId) {
       id: loan.id,
       loanName: loan.loanName,
       nextDueDate: expectedNextDueDate,
+      remainingBalance: expectedRemainingBalance,
+      termCount: expectedTermCount,
       status: expectedStatus,
     });
   }
