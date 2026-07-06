@@ -3,7 +3,7 @@ import { getDownloadURL, ref, uploadBytes } from "firebase/storage";
 import { storage } from "../firebase";
 
 const fieldClassName =
-  "h-11 rounded-2xl border border-slate-200 bg-white px-4 text-sm text-ink outline-none transition focus:border-amber focus:ring-4 focus:ring-amber/20";
+  "h-11 w-full min-w-0 rounded-2xl border border-slate-200 bg-white px-4 text-sm text-ink outline-none transition focus:border-amber focus:ring-4 focus:ring-amber/20";
 
 function UploadIcon() {
   return (
@@ -89,6 +89,7 @@ export default function PaymentForm({
   const [formData, setFormData] = React.useState(() => buildInitialFormState(initialValues));
   const [proofItems, setProofItems] = React.useState(() => buildInitialProofItems(initialValues));
   const [uploadError, setUploadError] = React.useState("");
+  const [isLocalSubmitting, setIsLocalSubmitting] = React.useState(false);
   const fileInputRef = React.useRef(null);
 
   React.useEffect(() => {
@@ -159,8 +160,10 @@ export default function PaymentForm({
 
   async function handleSubmit(event) {
     event.preventDefault();
+    if (isLocalSubmitting || isSubmitting || isDeleting) return;
 
     try {
+      setIsLocalSubmitting(true);
       setUploadError("");
 
       const proofImages = await Promise.all(
@@ -197,14 +200,16 @@ export default function PaymentForm({
       }
     } catch (error) {
       setUploadError(error.message || "Failed to upload proof of payment.");
+    } finally {
+      setIsLocalSubmitting(false);
     }
   }
 
   return (
-    isSubmitting || isDeleting ? (
+    isSubmitting || isLocalSubmitting || isDeleting ? (
       <LoadingState
         title={isDeleting ? "Removing payment" : initialValues ? "Updating payment" : "Saving payment"}
-        description="Please wait while the payment record and proof details are being updated."
+        description="Please wait while the payment record and proof details are being processed."
       />
     ) : (
     <form className="grid gap-4" onSubmit={handleSubmit}>

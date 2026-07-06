@@ -166,11 +166,17 @@ function getProofUrls(proofImages) {
 }
 
 function StatCard({ label, value }) {
+  const lowercaseLabel = label.toLowerCase();
+  let glowColor = "from-amber/20";
+  if (lowercaseLabel.includes("paid")) glowColor = "from-emerald-300/35";
+  else if (lowercaseLabel.includes("balance") || lowercaseLabel.includes("cash") || lowercaseLabel.includes("payable")) glowColor = "from-cyan-300/35";
+  else if (lowercaseLabel.includes("overdue") || lowercaseLabel.includes("shortfall")) glowColor = "from-rose-300/35";
+  
   return (
-    <article className="relative overflow-hidden rounded-3xl border border-white/70 bg-white/90 p-4 shadow-glass backdrop-blur transition duration-200 hover:-translate-y-0.5 hover:shadow-2xl sm:rounded-[28px] sm:p-5">
-      <div className="pointer-events-none absolute -bottom-10 -right-8 h-24 w-24 rounded-full bg-gradient-to-br from-amber/20 to-transparent" />
-      <span className="block text-sm text-slate-500">{label}</span>
-      <strong className="mt-2 block text-2xl font-semibold text-ink">{value}</strong>
+    <article className="relative overflow-hidden rounded-3xl border border-white/70 bg-white/90 p-4 shadow-glass backdrop-blur transition-all duration-300 ease-out hover:-translate-y-1 hover:shadow-2xl sm:rounded-[28px] sm:p-5">
+      <div className={`pointer-events-none absolute -bottom-10 -right-8 h-24 w-24 rounded-full bg-gradient-to-br ${glowColor} to-transparent`} />
+      <span className="block text-sm font-medium text-slate-500">{label}</span>
+      <strong className="mt-2 block text-xl font-bold tracking-tight text-ink sm:text-2xl break-words">{value}</strong>
     </article>
   );
 }
@@ -256,7 +262,7 @@ function SummarySection({ title, description, children }) {
   );
 }
 
-function ContainerCard({ container, loanCount, totalBalance, onOpen }) {
+function ContainerCard({ container, loanCount, onOpen }) {
   return (
     <button
       type="button"
@@ -273,12 +279,6 @@ function ContainerCard({ container, loanCount, totalBalance, onOpen }) {
         <span className="inline-flex items-center rounded-full bg-slate-100 px-3 py-2 text-xs font-semibold text-slate-600">
           {loanCount} loan{loanCount === 1 ? "" : "s"}
         </span>
-      </div>
-      <div className="relative mt-5">
-        <div>
-          <span className="text-sm text-slate-500">Remaining balance</span>
-          <strong className="mt-1 block text-xl font-semibold text-ink">{formatCurrency(totalBalance)}</strong>
-        </div>
       </div>
     </button>
   );
@@ -320,7 +320,7 @@ export default function App() {
   const [expandedLoanId, setExpandedLoanId] = React.useState("");
   const [selectedContainerView, setSelectedContainerView] = React.useState("loans");
   const [searchTerm, setSearchTerm] = React.useState("");
-  const [statusFilter, setStatusFilter] = React.useState("active");
+  const [statusFilter, setStatusFilter] = React.useState("active-overdue");
   const [loanTypeFilter, setLoanTypeFilter] = React.useState("fixed");
   const [dueWindowDays, setDueWindowDays] = React.useState(7);
   const [dueMonthCarouselIndex, setDueMonthCarouselIndex] = React.useState(0);
@@ -427,7 +427,12 @@ export default function App() {
     const searchableLoans = selectedContainerId ? loans.filter((loan) => loan.containerId === selectedContainerId) : loans;
 
     return searchableLoans.filter((loan) => {
-      const matchesStatus = statusFilter === "all" ? true : loan.status === statusFilter;
+      let matchesStatus = true;
+      if (statusFilter === "active-overdue") {
+        matchesStatus = loan.status === "active" || loan.status === "overdue";
+      } else if (statusFilter !== "all") {
+        matchesStatus = loan.status === statusFilter;
+      }
       
       let matchesLoanType = true;
       if (loanTypeFilter === "fixed") {
@@ -963,7 +968,7 @@ export default function App() {
     setSelectedContainerView("loans");
     setExpandedLoanId("");
     setSearchTerm("");
-    setStatusFilter("active");
+    setStatusFilter("active-overdue");
     setLoanTypeFilter("fixed");
     setDueWindowDays(7);
   }
@@ -973,7 +978,7 @@ export default function App() {
     setSelectedContainerView("loans");
     setExpandedLoanId("");
     setSearchTerm("");
-    setStatusFilter("active");
+    setStatusFilter("active-overdue");
     setLoanTypeFilter("fixed");
     setDueWindowDays(7);
   }
@@ -1051,7 +1056,6 @@ export default function App() {
                   key={container.id}
                   container={container}
                   loanCount={container.loanCount}
-                  totalBalance={container.totalBalance}
                   onOpen={() => handleOpenContainerPage(container.id)}
                 />
               ))}
@@ -1133,20 +1137,21 @@ export default function App() {
                   <label className="grid gap-2 text-sm font-semibold text-slate-700">
                     Status
                     <select
-                      className="h-11 rounded-2xl border border-slate-200 bg-white px-4 text-sm text-ink outline-none transition focus:border-amber focus:ring-4 focus:ring-amber/20"
+                      className="h-11 w-full max-w-full min-w-0 rounded-2xl border border-slate-200 bg-white px-4 text-sm text-ink outline-none transition focus:border-amber focus:ring-4 focus:ring-amber/20"
                       value={statusFilter}
                       onChange={(event) => setStatusFilter(event.target.value)}
                     >
                       <option value="all">All</option>
-                      <option value="active">Active</option>
-                      <option value="overdue">Overdue</option>
+                      <option value="active-overdue">Active & Overdue</option>
+                      <option value="active">Active only</option>
+                      <option value="overdue">Overdue only</option>
                       <option value="paid">Paid</option>
                     </select>
                   </label>
                   <label className="grid gap-2 text-sm font-semibold text-slate-700">
                     Loan type
                     <select
-                      className="h-11 rounded-2xl border border-slate-200 bg-white px-4 text-sm text-ink outline-none transition focus:border-amber focus:ring-4 focus:ring-amber/20"
+                      className="h-11 w-full max-w-full min-w-0 rounded-2xl border border-slate-200 bg-white px-4 text-sm text-ink outline-none transition focus:border-amber focus:ring-4 focus:ring-amber/20"
                       value={loanTypeFilter}
                       onChange={(event) => setLoanTypeFilter(event.target.value)}
                     >
@@ -1172,10 +1177,10 @@ export default function App() {
                     and overdue exposure. The sections below adapt to the loan-type filter so flexible loans stay free of fixed-only due logic.
                   </p>
                 </div>
-                <label className="grid gap-2 text-sm font-semibold text-slate-700">
+                <label className="grid gap-2 text-sm font-semibold text-slate-700 w-full sm:w-auto">
                   Loan type
                   <select
-                    className="h-11 min-w-[180px] rounded-2xl border border-slate-200 bg-white px-4 text-sm text-ink outline-none transition focus:border-amber focus:ring-4 focus:ring-amber/20"
+                    className="h-11 w-full max-w-full min-w-0 sm:min-w-[180px] rounded-2xl border border-slate-200 bg-white px-4 text-sm text-ink outline-none transition focus:border-amber focus:ring-4 focus:ring-amber/20"
                     value={loanTypeFilter}
                     onChange={(event) => setLoanTypeFilter(event.target.value)}
                   >
@@ -1200,24 +1205,26 @@ export default function App() {
           ) : null}
 
           {!isLoading && selectedContainerView === "loans" ? (
-            <div className="grid gap-4">
+            <div className="grid grid-cols-1 min-[450px]:grid-cols-2 lg:grid-cols-1 xl:grid-cols-2 gap-4">
               {filteredLoans.map((loan) => {
                 const linkedLoanIds = loan.linkedLoanIds || (loan.linkedLoanId ? [loan.linkedLoanId] : []);
                 const linkedLoans = loans.filter((l) => linkedLoanIds.includes(l.id));
+                const isExpanded = expandedLoanId === loan.id;
                 return (
-                  <LoanCard
-                    key={loan.id}
-                    loan={loan}
-                    linkedLoans={linkedLoans}
-                    onOpenPaymentModal={handleOpenPaymentModal}
-                    onEditPayment={handleOpenPaymentEditor}
-                    onViewPaymentProofs={handleOpenPaymentProofViewer}
-                    onEdit={handleOpenEditLoanModal}
-                    onDelete={handleRequestDeleteLoan}
-                    isDeleting={deletingLoanId === loan.id}
-                    isExpanded={expandedLoanId === loan.id}
-                    onToggle={() => handleToggleLoan(loan.id)}
-                  />
+                  <div key={loan.id} className={isExpanded ? "col-span-1 min-[450px]:col-span-2 lg:col-span-1 xl:col-span-2" : "col-span-1"}>
+                    <LoanCard
+                      loan={loan}
+                      linkedLoans={linkedLoans}
+                      onOpenPaymentModal={handleOpenPaymentModal}
+                      onEditPayment={handleOpenPaymentEditor}
+                      onViewPaymentProofs={handleOpenPaymentProofViewer}
+                      onEdit={handleOpenEditLoanModal}
+                      onDelete={handleRequestDeleteLoan}
+                      isDeleting={deletingLoanId === loan.id}
+                      isExpanded={isExpanded}
+                      onToggle={() => handleToggleLoan(loan.id)}
+                    />
+                  </div>
                 );
               })}
             </div>
@@ -1295,10 +1302,10 @@ export default function App() {
                   description="Use the selector to focus on the most urgent dues first, whether they are due tomorrow, within 3 days, or within the week."
                 >
                   <div className="mb-4 flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
-                    <label className="grid gap-2 text-sm font-semibold text-slate-700">
+                    <label className="grid gap-2 text-sm font-semibold text-slate-700 w-full sm:w-auto">
                       Due range
                       <select
-                        className="h-11 min-w-[160px] rounded-2xl border border-slate-200 bg-white px-4 text-sm text-ink outline-none transition focus:border-amber focus:ring-4 focus:ring-amber/20"
+                        className="h-11 w-full max-w-full min-w-0 sm:min-w-[160px] rounded-2xl border border-slate-200 bg-white px-4 text-sm text-ink outline-none transition focus:border-amber focus:ring-4 focus:ring-amber/20"
                         value={dueWindowDays}
                         onChange={(event) => setDueWindowDays(Number(event.target.value))}
                       >

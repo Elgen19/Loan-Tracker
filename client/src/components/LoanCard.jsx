@@ -73,15 +73,15 @@ export default function LoanCard({
 
   return (
     <article
-      className={`relative overflow-hidden rounded-[28px] border p-6 backdrop-blur transition duration-200 hover:-translate-y-0.5 hover:shadow-2xl ${
+      className={`relative overflow-hidden border p-4 sm:p-6 backdrop-blur transition-all duration-300 ease-out hover:-translate-y-1 hover:shadow-2xl ${
         isExpanded
-          ? "border-cyan-300/70 bg-gradient-to-br from-cyan-50 via-sky-50 to-white shadow-[0_22px_60px_rgba(20,94,129,0.18)]"
-          : "border-sky-100 bg-gradient-to-br from-white via-sky-50/80 to-amber-50/40 shadow-glass"
-      } rounded-3xl p-4 sm:rounded-[28px] sm:p-6`}
+          ? "border-cyan-300/80 bg-gradient-to-br from-cyan-50/50 via-sky-50/30 to-white shadow-[0_22px_60px_rgba(20,94,129,0.18)] rounded-[28px]"
+          : "border-sky-100/90 bg-gradient-to-br from-white via-sky-50/50 to-amber-50/30 shadow-glass rounded-3xl"
+      }`}
     >
       <div
-        className={`pointer-events-none absolute -bottom-10 -right-8 h-28 w-28 rounded-full bg-gradient-to-br transition ${
-          isExpanded ? "from-cyan-200/50 to-transparent" : "from-sky-200/40 to-transparent"
+        className={`pointer-events-none absolute -bottom-10 -right-8 h-28 w-28 rounded-full bg-gradient-to-br transition-all duration-300 ${
+          isExpanded ? "from-cyan-200/60 to-transparent" : "from-sky-200/50 to-transparent"
         }`}
       />
       <button
@@ -158,7 +158,7 @@ export default function LoanCard({
         </div>
 
         {loan.loanType === "fixed" ? (
-          <div className="mt-4 grid grid-cols-2 gap-3 sm:mt-5 sm:gap-4 lg:grid-cols-3">
+          <div className="mt-4 grid grid-cols-1 gap-2 min-[540px]:grid-cols-2 lg:grid-cols-3 sm:mt-5 sm:gap-4">
             <div>
               <span className="text-sm text-slate-500">Remaining balance</span>
               <strong className="mt-1 block text-base font-semibold text-ink sm:text-lg">{formatCurrency(loan.remainingBalance)}</strong>
@@ -175,7 +175,7 @@ export default function LoanCard({
             </div>
           </div>
         ) : (
-          <div className="mt-4 grid grid-cols-2 gap-3 sm:mt-5 sm:gap-4 lg:grid-cols-3">
+          <div className="mt-4 grid grid-cols-1 gap-2 min-[540px]:grid-cols-2 lg:grid-cols-3 sm:mt-5 sm:gap-4">
             <div>
               <span className="text-sm text-slate-500">Remaining balance</span>
               <strong className="mt-1 block text-base font-semibold text-ink sm:text-lg">{formatCurrency(loan.remainingBalance)}</strong>
